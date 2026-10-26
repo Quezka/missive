@@ -2,10 +2,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from ..domain import Account, Message, clean_html, group, link_targets, text_of
-from .errors import NotFound, SourceError
-from .ports import MailSource, MessageStore
-from .records import AccountRecord, FolderRecord, MessageRecord, SyncReport, ThreadRecord
+from ..domain import Account, Message, clean_html, group, guess_server, link_targets, text_of, valid_address
+from .errors import ApplicationError, NotFound, SourceError
+from .ports import MailSource, MessageStore, PasswordStore
+from .records import AccountDraft, AccountRecord, FolderRecord, MessageRecord, ServerGuess, SyncReport, ThreadRecord
 
 PER_FOLDER = 200  # how many of the newest messages a folder shows
 
@@ -13,9 +13,10 @@ PER_FOLDER = 200  # how many of the newest messages a folder shows
 class MailService:
     """Use cases for reading mail: fetch what's new, list conversations, open a message."""
 
-    def __init__(self, store: MessageStore, source: MailSource):
+    def __init__(self, store: MessageStore, source: MailSource, passwords: PasswordStore | None = None):
         self._store = store
         self._source = source
+        self._passwords = passwords
 
     # ---- accounts and folders ----
 
@@ -25,6 +26,55 @@ class MailService:
     def add_account(self, account: Account) -> AccountRecord:
         saved = self._store.add_account(account)
         return AccountRecord(saved.id, saved.name, saved.address, saved.color)
+
+    # ---- account setup ----
+
+    COLORS = ("#5b5bd6", "#30a46c", "#e5484d", "#f5a524", "#0091ff", "#a25bd6")
+
+    def guess_server(self, address: str) -> ServerGuess | None:
+        server = guess_server(address)
+        return ServerGuess(server.host, server.port, server.app_password, server.unsupported) if server else None
+
+    def _account_from(self, draft: AccountDraft, account_id: int = 0, color: str = "") -> Account:
+        address = draft.address.strip()
+        if not valid_address(address):
+            raise ApplicationError("That doesn't look like an email address.")
+        host = draft.host.strip()
+        if not host:
+            raise ApplicationError("Enter the mail server (for example imap.example.com).")
+        if not 0 < draft.port < 65536:
+            raise ApplicationError("The port must be a number between 1 and 65535.")
+        if not draft.password:
+            raise ApplicationError("Enter the password.")
+        username = draft.username.strip()
+        return Account(account_id, draft.name.strip() or address, address, host, draft.port,
+                       "" if username == address else username, color or self.COLORS[0])
+
+    def check_account(self, draft: AccountDraft) -> None:
+        """Try the sign-in without saving anything. Network only: safe on a worker thread."""
+        self._source.check(self._account_from(draft), draft.password)
+
+    def add_new_account(self, draft: AccountDraft) -> AccountRecord:
+        """Save a checked account and its password (in the keyring, never the database)."""
+        if self._passwords is None:
+            raise ApplicationError("There is nowhere safe to keep the password on this computer.")
+        color = self.COLORS[len(self._store.accounts()) % len(self.COLORS)]
+        saved = self._store.add_account(self._account_from(draft, 0, color))
+        try:
+            self._passwords.set(saved.id, draft.password)
+        except Exception as e:
+            self._store.remove_account(saved.id)  # no password, no account
+            raise ApplicationError(f"The password couldn't be saved in the system keyring: {e}") from e
+        return AccountRecord(saved.id, saved.name, saved.address, saved.color)
+
+    def remove_account(self, account_id: int) -> None:
+        """Forget an account: its stored mail and its password. Nothing changes on the server."""
+        self._store.remove_account(account_id)
+        if self._passwords is not None:
+            try:
+                self._passwords.delete(account_id)
+            except Exception:
+                pass  # already gone
 
     def folders(self) -> list[FolderRecord]:
         unread, totals = self._store.unread_counts(), self._store.totals()

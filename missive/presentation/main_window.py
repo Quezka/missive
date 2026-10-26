@@ -6,7 +6,7 @@ from datetime import datetime
 from PySide6.QtCore import QModelIndex, QRect, QSettings, QSize, Qt, QUrl
 from PySide6.QtGui import QColor, QDesktopServices, QFont, QFontMetrics, QPainter
 from PySide6.QtWidgets import (
-    QFrame, QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem, QMainWindow, QMessageBox,
+    QFrame, QMenu, QStackedWidget, QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem, QMainWindow, QMessageBox,
     QSplitter, QStyle, QStyledItemDelegate, QStyleOptionViewItem, QTextBrowser, QTreeWidget, QTreeWidgetItem,
     QVBoxLayout, QWidget,
 )
@@ -16,8 +16,9 @@ from ..application.errors import ApplicationError
 from ..application.records import MessageRecord, ThreadRecord
 from ..application.services import MailService
 from . import theme
+from .account_dialog import AccountDialog
 from .i18n import _
-from .views.common import Card, button, icon_button, label
+from .views.common import Card, button, icon_button, label, primary_button
 
 THREAD, FOLDER = Qt.UserRole + 1, Qt.UserRole + 2
 ALL_INBOXES = ("all", None)
@@ -100,8 +101,18 @@ class MainWindow(QMainWindow):
         self.folders = QTreeWidget(objectName="folders")
         self.folders.setHeaderHidden(True)
         self.folders.setIndentation(14)
-        self.folders.setMinimumWidth(150)
+        self.folders.setMinimumWidth(128)
         self.folders.currentItemChanged.connect(lambda *_a: self.show_list())
+        self.folders.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.folders.customContextMenuRequested.connect(self._folder_menu)
+        self.add_account_button = button(_("Add account"), "plus")
+        self.add_account_button.clicked.connect(self.add_account)
+        left = QWidget()
+        left_layout = QVBoxLayout(left)
+        left_layout.setContentsMargins(0, 0, 0, 8)
+        left_layout.setSpacing(0)
+        left_layout.addWidget(self.folders, 1)
+        left_layout.addWidget(self.add_account_button, 0, Qt.AlignHCenter)
 
         # ---- conversations
         self.search = QLineEdit(objectName="search", placeholderText=_("Search mail…"))
@@ -164,7 +175,7 @@ class MainWindow(QMainWindow):
         right_layout.addWidget(card)
 
         self.split = QSplitter(Qt.Horizontal)
-        for w in (self.folders, middle, right):
+        for w in (left, middle, right):
             self.split.addWidget(w)
         self.split.setStretchFactor(0, 0)
         self.split.setStretchFactor(1, 1)
@@ -173,7 +184,26 @@ class MainWindow(QMainWindow):
         sizes = QSettings().value("window/split")
         self.split.setSizes([int(x) for x in sizes] if sizes else [210, 400, 620])
         self.split.splitterMoved.connect(lambda *_a: QSettings().setValue("window/split", self.split.sizes()))
-        self.setCentralWidget(self.split)
+        # No account yet: a welcome page instead of three empty panes.
+        self.welcome = QWidget()
+        welcome = QVBoxLayout(self.welcome)
+        welcome.setAlignment(Qt.AlignCenter)
+        welcome.setSpacing(10)
+        headline = QLabel(_("Welcome to Missive"), objectName="pageTitle", alignment=Qt.AlignCenter)
+        intro = label(_("Add your mail account to start reading. Missive only reads: it never sends, moves, "
+                        "deletes or marks anything."), "muted")
+        intro.setWordWrap(True)
+        intro.setAlignment(Qt.AlignCenter)
+        intro.setMaximumWidth(420)
+        self.welcome_button = primary_button(_("Add a mail account"), "plus")
+        self.welcome_button.clicked.connect(self.add_account)
+        for w in (headline, intro):
+            welcome.addWidget(w, 0, Qt.AlignHCenter)
+        welcome.addWidget(self.welcome_button, 0, Qt.AlignHCenter)
+        self.pages = QStackedWidget()
+        self.pages.addWidget(self.split)
+        self.pages.addWidget(self.welcome)
+        self.setCentralWidget(self.pages)
         theme.themed(self._restyle)
         self.refresh_folders()
         self._clear_reader()
@@ -213,6 +243,7 @@ class MainWindow(QMainWindow):
                 top.addChild(child)
         self.folders.blockSignals(False)
         self._select_scope(keep or ALL_INBOXES)
+        self.pages.setCurrentWidget(self.split if accounts else self.welcome)
 
     @staticmethod
     def _label(name: str, unread: int) -> str:
@@ -342,6 +373,35 @@ class MainWindow(QMainWindow):
         answer = QMessageBox.question(self, APP_NAME, _("Open this link?\n\n{url}").format(url=target))
         if answer == QMessageBox.Yes:
             QDesktopServices.openUrl(url)
+
+    # ---- accounts ----
+
+    def add_account(self):
+        dialog = AccountDialog(self.service, self)
+        if dialog.exec() == AccountDialog.Accepted and dialog.added:
+            self.refresh_folders()
+            self.sync()
+
+    def _folder_menu(self, point):
+        item = self.folders.itemAt(point)
+        scope = item.data(0, FOLDER) if item else None
+        if not scope or scope == ALL_INBOXES or scope[1] is not None:
+            return
+        account_id = scope[0]
+        menu = QMenu(self)
+        remove = menu.addAction(_("Remove this account…"))
+        if menu.exec(self.folders.viewport().mapToGlobal(point)) is remove:
+            self.remove_account(account_id)
+
+    def remove_account(self, account_id: int):
+        name = next((a.name for a in self.service.accounts() if a.id == account_id), "")
+        answer = QMessageBox.question(self, APP_NAME, _("Remove {name} from Missive?\n\nIts messages are forgotten "
+                                      "here and its password is deleted. Nothing changes on the mail server.")
+                                      .format(name=name))
+        if answer == QMessageBox.Yes:
+            self.service.remove_account(account_id)
+            self._select_scope(ALL_INBOXES)
+            self.refresh_folders()
 
     # ---- fetching ----
 

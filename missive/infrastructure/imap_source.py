@@ -64,6 +64,14 @@ def role_of(flags: str, name: str) -> str:
     return "inbox" if name.upper() == "INBOX" else ""
 
 
+def _reason(e: Exception) -> str:
+    """A server's or network's complaint, as plain text."""
+    if isinstance(e, imaplib.IMAP4.error):
+        text = e.args[0] if e.args else ""
+        return (text.decode("utf-8", "replace") if isinstance(text, bytes) else str(text)) or "sign-in refused"
+    return str(e) or type(e).__name__
+
+
 class ImapSource:
     """MailSource over IMAP-over-TLS. `passwords` maps an account id to its password (the OS
     keyring in the app); `connect` makes the connection (replaced in tests)."""
@@ -76,13 +84,23 @@ class ImapSource:
     def _real_connect(account: Account):
         return imaplib.IMAP4_SSL(account.host, account.port)
 
-    def _session(self, account: Account):
+    def _session(self, account: Account, password: str | None = None):
         try:
             conn = self._connect(account)
-            conn.login(account.username or account.address, self._passwords(account.id))
+            conn.login(account.username or account.address,
+                       self._passwords(account.id) if password is None else password)
             return conn
         except (imaplib.IMAP4.error, OSError) as e:
-            raise SourceError(f"{account.name}: {e}") from e
+            raise SourceError(f"{account.name}: {_reason(e)}") from e
+
+    def check(self, account: Account, password: str) -> None:
+        conn = self._session(account, password)
+        try:
+            status, _ = conn.list()
+            if status != "OK":
+                raise SourceError(f"{account.name}: the server wouldn't list its folders")
+        finally:
+            self._close(conn)
 
     def folders(self, account: Account) -> list[Folder]:
         conn = self._session(account)

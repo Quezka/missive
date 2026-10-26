@@ -30,6 +30,9 @@ class DemoSource:
     def __init__(self, now: datetime | None = None):
         self.now = now or datetime.now()
 
+    def check(self, account: Account, password: str) -> None:
+        pass  # the demo accepts anything
+
     def folders(self, account: Account) -> list[Folder]:
         return [Folder(account.id, "INBOX", "inbox"), Folder(account.id, "Sent", "sent"),
                 Folder(account.id, "Archive", "archive")]

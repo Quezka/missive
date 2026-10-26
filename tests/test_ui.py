@@ -76,3 +76,61 @@ def test_every_folder_can_be_opened(window):
     for i in range(window.folders.topLevelItemCount()):
         walk(window.folders.topLevelItem(i))
     assert window.folders.currentItem() is not None
+
+
+def _settle(app, until, seconds=10):
+    import time
+    end = time.time() + seconds
+    while time.time() < end and not until():
+        app.processEvents()
+        time.sleep(0.01)
+
+
+def test_with_no_account_a_welcome_page_leads_to_account_setup(app):
+    from missive.application.services import MailService
+    from missive.infrastructure.demo_source import DemoSource
+    from missive.infrastructure.passwords import MemoryPasswords
+    from missive.infrastructure.sqlite_store import SqliteStore
+    service = MailService(SqliteStore(":memory:"), DemoSource(), MemoryPasswords())
+    w = MainWindow(service)
+    w.show()
+    assert w.pages.currentWidget() is w.welcome
+    from missive.presentation.account_dialog import AccountDialog
+    dialog = AccountDialog(service, w)
+    assert not dialog.add_button.isEnabled()  # nothing typed yet
+    dialog.address.setText("me@libero.it")
+    dialog.password.setText("secret")
+    assert dialog.add_button.isEnabled() and dialog.draft().host == "imapmail.libero.it"
+    assert "app password" not in dialog.hint.text()
+    dialog.address.setText("me@gmail.com")
+    assert "app password" in dialog.hint.text()
+    dialog.address.setText("me@outlook.com")
+    assert not dialog.add_button.isEnabled() and "OAuth" in dialog.hint.text()
+    dialog.address.setText("me@libero.it")
+    dialog.add_button.click()  # checks on a worker thread, then saves on this one
+    _settle(app, lambda: dialog.added is not None)
+    assert dialog.added is not None and dialog.added.address == "me@libero.it"
+    w.refresh_folders()
+    assert w.pages.currentWidget() is w.split
+    w.close()
+
+
+def test_a_wrong_password_shows_the_server_reason_and_adds_nothing(app):
+    from missive.application.errors import SourceError
+    from missive.application.services import MailService
+    from missive.infrastructure.demo_source import DemoSource
+    from missive.infrastructure.passwords import MemoryPasswords
+    from missive.infrastructure.sqlite_store import SqliteStore
+    from missive.presentation.account_dialog import AccountDialog
+
+    class Refusing(DemoSource):
+        def check(self, account, password):
+            raise SourceError("Home: [AUTHENTICATIONFAILED] Invalid credentials")
+    service = MailService(SqliteStore(":memory:"), Refusing(), MemoryPasswords())
+    dialog = AccountDialog(service)
+    dialog.address.setText("me@libero.it")
+    dialog.password.setText("wrong")
+    dialog.add_button.click()
+    _settle(app, lambda: not dialog.error.isHidden())
+    assert "AUTHENTICATIONFAILED" in dialog.error.text() and service.accounts() == []
+    assert dialog.add_button.isEnabled() and dialog.result() == 0

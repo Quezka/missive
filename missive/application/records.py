@@ -60,3 +60,22 @@ class MessageRecord:
 class SyncReport:
     new: int
     folders: int
+
+
+@dataclass(frozen=True)
+class ServerGuess:
+    host: str
+    port: int
+    app_password: bool  # the provider wants an app-specific password
+    unsupported: str  # "oauth" when the provider only allows OAuth sign-in
+
+
+@dataclass(frozen=True)
+class AccountDraft:
+    """What the account setup screen collects."""
+    name: str
+    address: str
+    host: str
+    port: int
+    username: str
+    password: str

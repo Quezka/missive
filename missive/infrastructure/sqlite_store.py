@@ -79,6 +79,13 @@ class SqliteStore:
                 (a.name, a.address, a.host, a.port, a.username, a.color))
         return Account(cur.lastrowid, a.name, a.address, a.host, a.port, a.username, a.color)
 
+    def remove_account(self, account_id: int) -> None:
+        with self.conn:
+            if self.fts:
+                self.conn.execute("DELETE FROM mail_fts WHERE rowid IN (SELECT id FROM messages WHERE account_id = ?)",
+                                  (account_id,))
+            self.conn.execute("DELETE FROM accounts WHERE id = ?", (account_id,))  # folders and messages cascade
+
     def save_folders(self, folders: list[Folder]) -> None:
         with self.conn:
             for f in folders:
