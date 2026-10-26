@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">
+  <!-- Missive: a letter with its flap folded and one amber wax seal. -->
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#6b6be0"/>
+      <stop offset="1" stop-color="#4c4cc4"/>
+    </linearGradient>
+  </defs>
+  <rect x="16" y="16" width="224" height="224" rx="52" fill="url(#bg)"/>
+  <rect x="48" y="78" width="160" height="108" rx="14" fill="#ffffff"/>
+  <path d="M52 90 L128 148 L204 90" fill="none" stroke="#c7c7f2" stroke-width="10"
+        stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="128" cy="148" r="17" fill="#f5a524" stroke="#4c4cc4" stroke-width="6"/>
+</svg>

@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "missive"
+dynamic = ["version"]
+description = "A calm, fast, private mail client in the Quire suite's style"
+readme = "README.md"
+license = "GPL-3.0-or-later"
+license-files = ["LICENSE"]
+requires-python = ">=3.10"
+dependencies = ["PySide6>=6.6"]
+
+[project.optional-dependencies]
+build = ["pyinstaller>=6.0"]
+
+[project.gui-scripts]
+missive = "missive.app:main"
+
+[tool.setuptools.dynamic]
+version = {attr = "missive.__version__"}
+
+[tool.setuptools.packages.find]
+include = ["missive*"]
+
+[tool.setuptools.package-data]
+missive = ["assets/*"]
