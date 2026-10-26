@@ -1,1 +1,3 @@
 PySide6>=6.6
+# The suite's shared UI toolkit. While it has no remote: pip install -e ../suite-kit
+quezka-ui
