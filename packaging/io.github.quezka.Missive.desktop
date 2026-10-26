@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Missive
+GenericName=Mail Client
+Comment=A calm, private, read-only mail client
+Exec=missive %f
+Icon=io.github.quezka.Missive
+Terminal=false
+Categories=Office;ProjectManagement;Education;
+Keywords=mail;email;imap;inbox;

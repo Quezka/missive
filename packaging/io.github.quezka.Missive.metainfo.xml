@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- AppStream metadata: what Ubuntu App Center / GNOME Software show about Missive. -->
+<component type="desktop-application">
+  <id>io.github.quezka.Missive</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-or-later</project_license>
+
+  <name>Missive</name>
+  <summary>A calm, private, read-only mail client</summary>
+  <developer id="io.github.quezka">
+    <name>Quezka</name>
+  </developer>
+
+  <description>
+    <p>
+      Missive reads your mail over IMAP and never changes it: nothing is sent, moved, deleted or marked.
+      Conversations are threaded, search is instant, HTML mail is cleaned and remote pictures stay blocked
+      until you load them. Passwords live in the system keyring.
+    </p>
+  </description>
+
+  <launchable type="desktop-id">io.github.quezka.Missive.desktop</launchable>
+  <provides>
+    <binary>missive</binary>
+  </provides>
+
+  <url type="homepage">https://github.com/Quezka/missive</url>
+  <url type="bugtracker">https://github.com/Quezka/missive/issues</url>
+
+  <categories>
+    <category>Network</category>
+    <category>Email</category>
+  </categories>
+  <keywords>
+    <keyword>mail</keyword>
+    <keyword>email</keyword>
+    <keyword>imap</keyword>
+  </keywords>
+
+  <content_rating type="oars-1.1"/>
+
+  <!-- Newest first. Every released version needs an entry. -->
+  <releases>
+    <release version="0.1.0" date="2026-10-27">
+      <description>
+        <p>Missive starts when you log in: it checks quietly and opens its window only when an update is waiting. "Start with the computer" turns it off (on by default the first time it runs).</p>
+      </description>
+    </release>
+  </releases>
+</component>

@@ -1,0 +1,101 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: sudo apt-get update && sudo apt-get install -y libegl1 libgl1 libxkbcommon0 libfontconfig1 libdbus-1-3
+      - run: pip install -e . pytest
+      - run: pytest -q
+        env:
+          QT_QPA_PLATFORM: offscreen
+
+  package-linux:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: sudo apt-get update && sudo apt-get install -y libegl1 libgl1 libxkbcommon0 libfontconfig1 libdbus-1-3
+      - run: pip install -e ".[build]"
+      - run: python scripts/build.py --deb
+        env:
+          QT_QPA_PLATFORM: offscreen
+      - uses: actions/upload-artifact@v4
+        with:
+          retention-days: 1
+          name: Missive-Linux
+          path: dist/*.deb
+
+  package-windows:
+    needs: test
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install Inno Setup (if the runner lacks it)
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) {
+            choco install innosetup -y --no-progress
+          }
+      - run: pip install -e ".[build]"
+      - run: python scripts/build.py --installer
+      - uses: actions/upload-artifact@v4
+        with:
+          retention-days: 1
+          name: Missive-Windows
+          path: dist/*-setup.exe
+
+  release:
+    # Pushing a tag like v1.2.3 publishes that version's .deb and setup .exe.
+    needs: [package-linux, package-windows]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check the tag matches the app version
+        run: |
+          version=$(python3 -c "import re; print(re.search(r'__version__ = \"(.+?)\"', open('missive/__init__.py').read()).group(1))")
+          if [ "v$version" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match missive.__version__ ($version)"
+            exit 1
+          fi
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Publish the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 scripts/release_notes.py "$VERSION" > notes.md
+          cat >> notes.md <<'NOTES'
+
+          ## Install
+
+          **Debian / Ubuntu:** `sudo apt install ./missive_*_amd64.deb`. Missive appears in your
+          app menu.
+
+          **Windows:** download `Missive-…-windows-x64-setup.exe` and run it. It installs for your
+          user (no admin needed) It isn't code-signed, so SmartScreen
+          may warn you: choose *More info → Run anyway*.
+          NOTES
+          gh release create "$GITHUB_REF_NAME" --verify-tag --title "Missive $VERSION" \
+            --notes-file notes.md artifacts/Missive-Linux/*.deb artifacts/Missive-Windows/*-setup.exe
