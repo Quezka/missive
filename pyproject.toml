@@ -10,7 +10,7 @@ readme = "README.md"
 license = "GPL-3.0-or-later"
 license-files = ["LICENSE"]
 requires-python = ">=3.10"
-dependencies = ["PySide6>=6.6", "quezka-ui"]
+dependencies = ["PySide6>=6.6", "quezka-ui @ git+https://github.com/Quezka/suite-kit@v0.3.0"]
 
 [project.optional-dependencies]
 build = ["pyinstaller>=6.0"]
