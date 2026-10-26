@@ -5,6 +5,7 @@ NAMES: dict[str, list[str]] = {}
 PLURALS: dict[str, tuple] = {}
 
 MESSAGES = {
+    'High contrast (black and white, thick lines)': 'Высокая контрастность (чёрное и белое, толстые линии)',
     'All inboxes': 'Все входящие',
     'Archive': 'Архив',
     'Check for new mail': 'Проверить новую почту',
