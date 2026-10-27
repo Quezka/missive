@@ -45,6 +45,7 @@ class AccountDialog(QDialog):
         self.added = None  # the AccountRecord, once saved
         self._host_edited = False
         self._method_edited = False
+        self._smtp_edited = False
         self._thread: QThread | None = None
         self.setWindowTitle(_("Add a mail account"))
         self.setMinimumWidth(420)
@@ -59,12 +60,14 @@ class AccountDialog(QDialog):
         self.host = QLineEdit(placeholderText="imap.example.com")
         self.port = QSpinBox(minimum=1, maximum=65535, value=993)
         self.username = QLineEdit(placeholderText=_("Same as the address"))
+        self.smtp_host = QLineEdit(placeholderText="smtp.example.com")
+        self.smtp_port = QSpinBox(minimum=1, maximum=65535, value=587)
         self.hint = label("", "muted")
         self.hint.setWordWrap(True)
         self.error = QLabel(objectName="danger")
         self.error.setWordWrap(True)
         self.error.hide()
-        self.safety = label(_("Missive only reads your mail: it never sends, moves, deletes or marks anything. "
+        self.safety = label(_("Missive reads your mail without changing it and sends only what you write yourself. "
                               "The password, or the sign-in token for Google and Microsoft, is kept in your "
                               "system's keyring."), "hint")
         self.safety.setWordWrap(True)
@@ -85,6 +88,8 @@ class AccountDialog(QDialog):
         server_form.addRow(_("Server"), self.host)
         server_form.addRow(_("Port"), self.port)
         server_form.addRow(_("Username"), self.username)
+        server_form.addRow(_("Outgoing server"), self.smtp_host)
+        server_form.addRow(_("Outgoing port"), self.smtp_port)
         self.server_box.hide()
         self.server_toggle.toggled.connect(self._show_server)
         self.add_button = primary_button(_("Add account"), None)
@@ -110,6 +115,7 @@ class AccountDialog(QDialog):
         self.address.textChanged.connect(self._address_changed)
         self.method.activated.connect(self._method_chosen)
         self.host.textEdited.connect(lambda _t: setattr(self, "_host_edited", True))
+        self.smtp_host.textEdited.connect(lambda _t: setattr(self, "_smtp_edited", True))
         for edit in (self.address, self.password):
             edit.textChanged.connect(self._update_button)
         self._method_changed()
@@ -145,6 +151,10 @@ class AccountDialog(QDialog):
             host = self.service.oauth_host(auth) if oauth else (guess.host if guess else "")
             self.host.setText(host)
             self.port.setValue(993 if oauth or guess is None else guess.port)
+        if not self._smtp_edited and guess is not None:
+            smtp_host, smtp_port = self.service.smtp_server(self.address.text(), auth)
+            self.smtp_host.setText(smtp_host)
+            self.smtp_port.setValue(smtp_port)
         if oauth and not self.service.oauth_available(auth):
             self.hint.setText(_("This sign-in isn't set up yet: add its client ID (see docs/OAUTH.md)."))
         elif oauth:
@@ -176,7 +186,8 @@ class AccountDialog(QDialog):
         port = self.port.value()
         username = self.username.text().strip()
         return AccountDraft(self.name.text(), self.address.text(), host, port,
-                            username or self.address.text().strip(), self.password.text(), self.auth())
+                            username or self.address.text().strip(), self.password.text(), self.auth(),
+                            self.smtp_host.text().strip(), self.smtp_port.value())
 
     # ---- checking and saving ----
 

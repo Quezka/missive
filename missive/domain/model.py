@@ -28,6 +28,8 @@ class Account:
     username: str = ""
     color: str = "#5b5bd6"
     auth: str = "password"  # how it signs in: "password" (also an app password), "google" or "microsoft" (OAuth)
+    smtp_host: str = ""  # where mail is sent from; empty = worked out from the provider (see providers.smtp_for)
+    smtp_port: int = 587
 
 
 @dataclass(frozen=True)

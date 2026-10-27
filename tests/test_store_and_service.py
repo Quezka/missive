@@ -76,6 +76,7 @@ def test_a_database_from_before_oauth_gains_the_auth_column_and_keeps_its_accoun
     from missive.infrastructure.sqlite_store import SqliteStore
     store = SqliteStore(path)
     assert [(a.address, a.auth) for a in store.accounts()] == [("me@libero.it", "password")]
+    assert [(a.smtp_host, a.smtp_port) for a in store.accounts()] == [("", 587)]  # sending came later still
     from missive.domain import Account
     saved = store.add_account(Account(0, "G", "me@gmail.com", "imap.gmail.com", auth="google"))
     assert [a.auth for a in store.accounts()] == ["password", "google"] and saved.auth == "google"

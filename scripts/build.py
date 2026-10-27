@@ -53,7 +53,7 @@ def write_windows_version_file() -> Path:
     nums = tuple(parts + [0] * (4 - len(parts)))
     strings = {
         "CompanyName": missive.DEVELOPER,
-        "FileDescription": f"{missive.APP_NAME}: a calm, private, read-only mail client",
+        "FileDescription": f"{missive.APP_NAME}: a calm, private mail client",
         "FileVersion": missive.__version__,
         "InternalName": missive.APP_NAME,
         "LegalCopyright": f"Copyright (c) {date.today().year} {missive.DEVELOPER}",

@@ -2,9 +2,9 @@
 
 A calm, fast, private mail client in the style of the Quire suite (Quire, Ligature, Gantry…).
 
-**Status: 0.1.0, a first slice.** It reads mail, read-only, from IMAP accounts and from a built-in demo
-mailbox. It does not send, delete, move or mark anything on a server. Nothing here has been run against
-a real mailbox yet.
+**Status: 0.5.** It reads mail from IMAP accounts (without changing anything on the server) and from a built-in
+demo mailbox, and it can write: new message, reply, reply to all, forward, with a few seconds to undo after Send.
+It does not delete, move or mark mail on a server.
 
 ```bash
 python -m venv .venv && .venv/bin/pip install -r requirements.txt
@@ -20,6 +20,7 @@ python -m venv .venv && .venv/bin/pip install -r requirements.txt
   (they are how senders know you opened a message) until you press "Load pictures"; every link is shown
   with its real address and asks before it opens.
 - The IMAP adapter only uses `EXAMINE` and `BODY.PEEK`, so looking at mail never marks it read.
+- Writing: new message, reply, reply to all and forward; Send waits eight seconds (with Undo) and then goes out over SMTP with TLS, signed in with your password or your Google/Microsoft token. Nothing is typed or sent behind your back.
 - Checks for new mail in the background (on opening and every five minutes) and keeps the newest letters ready, so the window never waits for the server.
 - Russian and Italian translations, like the rest of the suite.
 
@@ -31,7 +32,7 @@ tokens live in the system keyring.
 
 ## Not yet (see CHANGELOG for the plan)
 
-Writing and sending, undo-send, snooze,
+Attachments (you can read mail that has them, not send them yet), drafts, snooze,
 rules, keyboard shortcuts, suite integration (mail → Quire task, invite →
 Quire event, "Edit in Ligature"), packaging (.deb, Windows installer), an Android app.
 

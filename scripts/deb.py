@@ -105,9 +105,9 @@ def build_deb(app_dir: Path, png_icon: Path, out_dir: Path, work_dir: Path) -> P
         f"Section: mail\n"
         f"Priority: optional\n"
         f"Homepage: {missive.HOMEPAGE}\n"
-        f"Description: A calm, private, read-only mail client\n"
-        f" Missive reads your mail over IMAP without changing it: threads, search,\n"
-        f" and a safe view of HTML mail with remote pictures blocked.\n"
+        f"Description: A calm, private mail client\n"
+        f" Missive reads your mail over IMAP without changing it and sends only what you\n"
+        f" write: threads, search, a safe view of HTML mail with remote pictures blocked.\n"
     )
     debian.chmod(0o755)
     (debian / "control").chmod(0o644)

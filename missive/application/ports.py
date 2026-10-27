@@ -4,7 +4,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Protocol
 
-from ..domain import Account, Folder, Message
+from ..domain import Account, Folder, Message, Outgoing
 
 
 class MailSource(Protocol):
@@ -26,6 +26,19 @@ class MailSource(Protocol):
         """Sign in with this secret (the password, or the OAuth refresh token for a Google or Microsoft
         account) and look at the folder list; raises SourceError when it fails.
         Network only (no store access), so it may run on a worker thread."""
+        ...
+
+
+    def save_sent(self, account: Account, folder: str, raw: bytes) -> None:
+        """Keep a copy of a sent message in the Sent folder (servers that don't do it themselves)."""
+        ...
+
+
+class MailSender(Protocol):
+    """Sends mail: the one thing in Missive that writes to the world, and only when the user presses Send."""
+
+    def send(self, account: Account, secret: str, mail: Outgoing) -> bytes:
+        """Send it; returns the message as it went out. Raises SourceError when the server refuses."""
         ...
 
 

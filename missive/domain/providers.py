@@ -13,6 +13,33 @@ class Server:
     oauth: str = ""  # "google" or "microsoft" when the provider offers OAuth sign-in (the better way)
 
 
+# Where mail is sent from: (host, port). 465 is TLS from the start, 587 starts plain and upgrades (STARTTLS).
+SMTP_SERVERS = {
+    "imap.gmail.com": ("smtp.gmail.com", 465), "imap.mail.me.com": ("smtp.mail.me.com", 587),
+    "imap.mail.yahoo.com": ("smtp.mail.yahoo.com", 465), "imap.fastmail.com": ("smtp.fastmail.com", 465),
+    "imap.yandex.com": ("smtp.yandex.com", 465), "imap.mail.ru": ("smtp.mail.ru", 465),
+    "outlook.office365.com": ("smtp-mail.outlook.com", 587), "imapmail.libero.it": ("smtp.libero.it", 465),
+    "box.virgilio.it": ("smtp.virgilio.it", 465), "imap.tiscali.it": ("smtp.tiscali.it", 465),
+    "imaps.aruba.it": ("smtps.aruba.it", 465), "imap.gmx.com": ("mail.gmx.com", 587),
+    "imap.gmx.net": ("mail.gmx.net", 587), "imap.mail.com": ("smtp.mail.com", 587),
+    "imap.zoho.com": ("smtp.zoho.com", 465),
+}
+OAUTH_SMTP = {"google": ("smtp.gmail.com", 465), "microsoft": ("smtp.office365.com", 587)}  # signed-in accounts
+
+
+def smtp_for(imap_host: str, auth: str = "password", address: str = "") -> tuple[str, int]:
+    """Where to send from, given an account's IMAP server: the provider's own, else `smtp.` in place of `imap.`.
+    A Microsoft sign-in on a company domain uses Microsoft 365's server; Outlook.com and Hotmail use theirs."""
+    if auth == "microsoft" and (domain_of(address) or "") not in PROVIDERS:
+        return OAUTH_SMTP["microsoft"]
+    if auth == "google":
+        return OAUTH_SMTP["google"]
+    host = imap_host.strip().lower()
+    if host in SMTP_SERVERS:
+        return SMTP_SERVERS[host]
+    return (re.sub(r"^imaps?\.", "smtp.", host) if re.match(r"^imaps?\.", host) else f"smtp.{host}"), 587
+
+
 AUTH_METHODS = ("password", "google", "microsoft")
 OAUTH_HOSTS = {"google": "imap.gmail.com", "microsoft": "outlook.office365.com"}  # for custom domains on them
 

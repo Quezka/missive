@@ -2,11 +2,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from ..domain import (AUTH_METHODS, OAUTH_HOSTS, Account, Message, clean_html, display_name, group, guess_server,
-                      link_targets, text_of, valid_address)
+from ..domain import (AUTH_METHODS, OAUTH_HOSTS, Account, Address, DomainError, Message, Outgoing, check_outgoing,
+                      clean_html, display_name, forward_subject, forwarded, group, guess_server, link_targets,
+                      parse_recipients, quote, reply_recipients, reply_subject, smtp_for, text_of, valid_address)
 from .errors import ApplicationError, NotFound, SourceError
-from .ports import MailSource, MessageStore, OAuthClient, PasswordStore
-from .records import AccountDraft, AccountRecord, FolderRecord, MessageRecord, ServerGuess, SyncReport, ThreadRecord
+from .ports import MailSender, MailSource, MessageStore, OAuthClient, PasswordStore
+from .records import (AccountDraft, AccountRecord, DraftRecord, FolderRecord, MessageRecord, ServerGuess, SyncReport,
+                      ThreadRecord)
 
 PER_FOLDER = 200  # how many of the newest messages a folder shows
 
@@ -15,11 +17,12 @@ class MailService:
     """Use cases for reading mail: fetch what's new, list conversations, open a message."""
 
     def __init__(self, store: MessageStore, source: MailSource, passwords: PasswordStore | None = None,
-                 oauth: OAuthClient | None = None):
+                 oauth: OAuthClient | None = None, sender: MailSender | None = None):
         self._store = store
         self._source = source
         self._passwords = passwords
         self._oauth = oauth
+        self._sender = sender
 
     # ---- accounts and folders ----
 
@@ -36,7 +39,15 @@ class MailService:
 
     def guess_server(self, address: str) -> ServerGuess | None:
         server = guess_server(address)
-        return ServerGuess(server.host, server.port, server.app_password, server.oauth) if server else None
+        if server is None:
+            return None
+        smtp_host, smtp_port = smtp_for(server.host, "password", address)
+        return ServerGuess(server.host, server.port, server.app_password, server.oauth, smtp_host, smtp_port)
+
+    def smtp_server(self, address: str, auth: str) -> tuple[str, int]:
+        """Where mail is sent from for this address and way of signing in."""
+        server = guess_server(address)
+        return smtp_for(server.host if server else "", auth, address)
 
     def oauth_host(self, provider: str) -> str:
         """The IMAP server for a Google or Microsoft account, even on the user's own domain."""
@@ -78,7 +89,8 @@ class MailService:
             raise ApplicationError("Sign in first, in your browser.")
         username = draft.username.strip()
         return Account(account_id, draft.name.strip() or address, address, host, draft.port,
-                       "" if username == address else username, color or self.COLORS[0], draft.auth)
+                       "" if username == address else username, color or self.COLORS[0], draft.auth,
+                       draft.smtp_host.strip(), draft.smtp_port if 0 < draft.smtp_port < 65536 else 587)
 
     def check_account(self, draft: AccountDraft) -> None:
         """Try the sign-in without saving anything. Network only: safe on a worker thread."""
@@ -147,6 +159,75 @@ class MailService:
         if problems and folders == 0 and new == 0:
             raise first or SourceError(problems[0])
         return SyncReport(new, folders, tuple(problems))
+
+    # ---- writing ----
+
+    def can_send(self) -> bool:
+        return self._sender is not None
+
+    def new_draft(self, account_id: int | None = None) -> DraftRecord:
+        accounts = self._store.accounts()
+        if not accounts:
+            raise ApplicationError("Add a mail account first.")
+        return DraftRecord(account_id if account_id in {a.id for a in accounts} else accounts[0].id)
+
+    def _original(self, key: tuple[int, str, int]) -> tuple[Message, Account]:
+        m = self._store.message(*key)
+        account = next((a for a in self._store.accounts() if a.id == key[0]), None)
+        if m is None or account is None:
+            raise NotFound("That message is gone.")
+        return m, account
+
+    @staticmethod
+    def _plain(m: Message) -> str:
+        return m.body_text if m.body_text is not None else text_of(m.body_html or "")
+
+    def reply_draft(self, key: tuple[int, str, int], everyone: bool = False) -> DraftRecord:
+        """A reply to a message (to everyone on it with `everyone`), with the original quoted underneath."""
+        m, account = self._original(key)
+        to, cc = reply_recipients(m.sender, m.to, m.cc, account.address, everyone)
+        refs = (*m.references, *([m.message_id] if m.message_id else ()))
+        return DraftRecord(account.id, ", ".join(map(str, to)), ", ".join(map(str, cc)), "",
+                           reply_subject(m.subject), quote(self._plain(m), m.sender.display, m.sent),
+                           m.message_id, tuple(refs))
+
+    def forward_draft(self, key: tuple[int, str, int]) -> DraftRecord:
+        m, account = self._original(key)
+        return DraftRecord(account.id, "", "", "", forward_subject(m.subject),
+                           forwarded(self._plain(m), m.sender, m.sent, m.subject, m.to))
+
+    def check_draft(self, draft: DraftRecord) -> None:
+        """Say what is wrong with a message before it is sent (no recipient, a mistyped address)."""
+        try:
+            check_outgoing(parse_recipients(draft.to), parse_recipients(draft.cc), parse_recipients(draft.bcc))
+        except DomainError as e:
+            raise ApplicationError(str(e)) from e
+
+    def send(self, draft: DraftRecord) -> None:
+        """Send a message. Waits for the server, so run it on a worker thread. Nothing is sent when anything
+        about it is wrong; a copy is kept in Sent only for accounts whose server doesn't do that by itself."""
+        if self._sender is None:
+            raise ApplicationError("Sending isn't available here.")
+        account = next((a for a in self._store.accounts() if a.id == draft.account_id), None)
+        if account is None:
+            raise NotFound("That account is gone.")
+        try:
+            to, cc, bcc = (parse_recipients(draft.to), parse_recipients(draft.cc), parse_recipients(draft.bcc))
+            check_outgoing(to, cc, bcc)
+        except DomainError as e:
+            raise ApplicationError(str(e)) from e
+        if self._passwords is None:
+            raise ApplicationError("There is nowhere safe to keep the password on this computer.")
+        mail = Outgoing(Address(account.address), to, draft.subject.strip(), draft.text, cc, bcc,
+                        draft.in_reply_to, draft.references)
+        raw = self._sender.send(account, self._passwords.get(account.id), mail)
+        if account.auth == "password":  # Gmail and Outlook file sent mail themselves; most others don't
+            sent = next((f.name for f in self._store.folders(account.id) if f.role == "sent"), None)
+            if sent:
+                try:
+                    self._source.save_sent(account, sent, raw)
+                except Exception:  # noqa: BLE001 (the message is sent; a missing copy is only a pity)
+                    pass
 
     # ---- lists ----
 

@@ -53,7 +53,7 @@ def endpoints(provider: str, ids: ClientIds) -> Endpoints:
     if provider == "microsoft":
         base = f"https://login.microsoftonline.com/{urllib.parse.quote(ids.tenant or 'common')}/oauth2/v2.0"
         return Endpoints(f"{base}/authorize", f"{base}/token",
-                         "https://outlook.office.com/IMAP.AccessAsUser.All offline_access", "localhost")
+                         "https://outlook.office.com/IMAP.AccessAsUser.All https://outlook.office.com/SMTP.Send offline_access", "localhost")
     raise SourceError("Choose Google or Microsoft to sign in without a password.")
 
 

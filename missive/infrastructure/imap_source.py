@@ -249,6 +249,14 @@ class ImapSource:
                     return text, html
             return None, None
 
+    def save_sent(self, account: Account, folder: str, raw: bytes) -> None:
+        """Put a copy of a sent message in the Sent folder, marked read (IMAP APPEND)."""
+        with self._kept(account, "sync") as slot:
+            slot.folder = None  # APPEND doesn't select, but keep the bookkeeping simple
+            status, _ = slot.conn.append(f'"{folder}"', "\\Seen", imaplib.Time2Internaldate(time.time()), raw)
+            if status != "OK":
+                raise SourceError(f"{account.name}: the server wouldn't keep a copy in {folder}")
+
     @staticmethod
     def _close(conn):
         try:

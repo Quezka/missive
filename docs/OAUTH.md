@@ -3,7 +3,7 @@
 Missive can sign in to Gmail (and Google Workspace / school accounts on Google) and to Outlook, Hotmail and
 Microsoft 365 **without a password**: your browser opens, you approve Missive, and Missive keeps only a
 refresh token in the system keyring. It is the standard desktop flow (OAuth 2.0 authorization code with PKCE and
-a `127.0.0.1` redirect), and IMAP is then opened with XOAUTH2. Missive is still read-only.
+a `127.0.0.1` redirect), and IMAP and SMTP are then opened with XOAUTH2. Google needs nothing extra: the same `https://mail.google.com/` scope covers sending.
 
 Both providers want every app to have its own **client ID**, made by whoever runs the app. You make them once,
 for free, and put them in a small file. Nothing is sent anywhere else.
@@ -52,7 +52,7 @@ Gotchas:
 3. Redirect URI: platform **Mobile and desktop applications**, value `http://localhost`.
 4. *Authentication -> Allow public client flows -> Yes*.
 5. *API permissions -> Add a permission -> APIs my organization uses -> Office 365 Exchange Online -> Delegated ->
-   IMAP.AccessAsUser.All* (and `offline_access`, which Missive asks for). Work or school tenants may need an
+   IMAP.AccessAsUser.All* and *SMTP.Send* (to send mail), plus `offline_access`, which Missive asks for. An account added before sending existed must be removed and added again to grant *SMTP.Send*. Work or school tenants may need an
    administrator to grant consent, and administrators can switch IMAP off.
 6. Copy the **Application (client) ID** into `oauth.json`. `tenant` is `common` for any account, `consumers` for
    personal only, `organizations` for work or school only, or a tenant ID.

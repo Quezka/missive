@@ -4,7 +4,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from .application.services import MailService
-from .infrastructure.demo_source import HOME, SCHOOL, DemoSource
+from .infrastructure.demo_source import HOME, SCHOOL, DemoSender, DemoSource
 from .infrastructure.oauth import OAuthClient, load_client_ids
 from .infrastructure.passwords import KeyringPasswords, MemoryPasswords
 from .infrastructure.sqlite_store import SqliteStore
@@ -24,7 +24,7 @@ def build_services(demo: bool = False, store=None, source=None, passwords=None) 
         if not store.accounts():
             store.add_account(SCHOOL)
             store.add_account(HOME)
-        service = MailService(store, source, passwords or MemoryPasswords())
+        service = MailService(store, source, passwords or MemoryPasswords(), sender=DemoSender())
         service.sync()
         return service
     store = store or SqliteStore(data_dir() / "mail.db")
@@ -33,4 +33,6 @@ def build_services(demo: bool = False, store=None, source=None, passwords=None) 
         from .infrastructure.imap_source import ImapSource
 
         source = ImapSource((passwords or KeyringPasswords()).get, oauth=oauth)
-    return MailService(store, source, passwords or KeyringPasswords(), oauth)
+    from .infrastructure.smtp_sender import SmtpSender
+
+    return MailService(store, source, passwords or KeyringPasswords(), oauth, SmtpSender(oauth))

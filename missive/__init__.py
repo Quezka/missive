@@ -2,7 +2,7 @@
 
 Release metadata below is the single source for packaging and the About dialog.
 """
-__version__ = "0.4.2"
+__version__ = "0.5.0"
 
 APP_NAME = "Missive"
 APP_ID = "io.github.quezka.Missive"  # reverse-DNS id used by desktop files and AppStream

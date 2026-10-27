@@ -72,6 +72,8 @@ class ServerGuess:
     port: int
     app_password: bool  # the provider wants an app-specific password
     oauth: str  # "google" or "microsoft" when the provider offers OAuth sign-in
+    smtp_host: str = ""
+    smtp_port: int = 587
 
 
 @dataclass(frozen=True)
@@ -84,3 +86,18 @@ class AccountDraft:
     username: str
     password: str  # for an OAuth account: the refresh token, once the user has approved
     auth: str = "password"  # "password", "google" or "microsoft"
+    smtp_host: str = ""  # where mail is sent from; empty = the provider's
+    smtp_port: int = 587
+
+
+@dataclass(frozen=True)
+class DraftRecord:
+    """A message being written: what the compose window shows and sends back."""
+    account_id: int
+    to: str = ""  # as typed: "Anna <a@x.org>, b@y.org"
+    cc: str = ""
+    bcc: str = ""
+    subject: str = ""
+    text: str = ""
+    in_reply_to: str = ""
+    references: tuple[str, ...] = ()

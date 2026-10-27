@@ -6,15 +6,15 @@
   <project_license>GPL-3.0-or-later</project_license>
 
   <name>Missive</name>
-  <summary>A calm, private, read-only mail client</summary>
+  <summary>A calm, private mail client</summary>
   <developer id="io.github.quezka">
     <name>Quezka</name>
   </developer>
 
   <description>
     <p>
-      Missive reads your mail over IMAP and never changes it: nothing is sent, moved, deleted or marked.
-      Conversations are threaded, search is instant, HTML mail is cleaned and remote pictures stay blocked
+      Missive reads your mail over IMAP without changing it, and sends only what you write yourself
+      (new message, reply, forward, with a few seconds to undo). Conversations are threaded, search is instant, HTML mail is cleaned and remote pictures stay blocked
       until you load them. Passwords live in the system keyring.
     </p>
   </description>
@@ -41,6 +41,11 @@
 
   <!-- Newest first. Every released version needs an entry. -->
   <releases>
+    <release version="0.5.0" date="2026-10-27">
+      <description>
+        <p>Writing mail: new message, reply, reply to all and forward, with eight seconds to undo after Send. Works with passwords and with Google and Microsoft sign-in. Also faster checks and letters, and folder names in other alphabets.</p>
+      </description>
+    </release>
     <release version="0.4.2" date="2026-10-27">
       <description>
         <p>Faster checks: a folder with nothing new is skipped after one quick question to the server. Fetching letters ahead of time no longer delays the one you click, and only the start of each message is downloaded. Folder names in other alphabets are shown properly. A --debug switch shows how long each server step takes.</p>

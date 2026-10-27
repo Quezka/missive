@@ -1,5 +1,9 @@
 # Changelog
 
+## [0.5.0] - 2026-10-27
+
+Writing mail: **New message**, **Reply**, **Reply to all** and **Forward**, in a compose window that stays out of the way while you read. Send waits eight seconds with an **Undo** bar (and still sends if you close the window), then goes out over SMTP with TLS, signed in with your password or with your Google or Microsoft token (Google needs nothing new; a Microsoft account must be removed and added again once to grant the send permission). A message the server refuses comes back for you to fix, with everything you typed. Replies quote the original and keep the thread; Bcc stays out of the headers; a mistyped address is named before anything is sent. Accounts without Gmail's or Outlook's habit of filing sent mail get a copy in their Sent folder. Outgoing server settings per account (guessed for common providers). Includes everything in 0.4.2 below, which was never released on its own.
+
 ## [0.4.2] - 2026-10-27
 
 Faster and clearer. A folder with nothing new is now skipped after one tiny question to the server instead of being opened, so checking a big Gmail takes seconds. Fetching letters ahead of time uses its own connection and the check no longer shows as busy while it does, so a letter you click never waits behind it. Only the first 250 KB of a message is downloaded. Folder names written in other alphabets (a Russian Gmail's "Спам", "Корзина", "Вся почта") are now shown properly instead of as codes. `missive --debug` (or MISSIVE_DEBUG=1) prints how long each server step takes, to find slow spots.

@@ -33,6 +33,9 @@ class DemoSource:
     def check(self, account: Account, password: str) -> None:
         pass  # the demo accepts anything
 
+    def save_sent(self, account: Account, folder: str, raw: bytes) -> None:
+        pass
+
     def folders(self, account: Account) -> list[Folder]:
         return [Folder(account.id, "INBOX", "inbox"), Folder(account.id, "Sent", "sent"),
                 Folder(account.id, "Archive", "archive")]
@@ -77,3 +80,14 @@ class DemoSource:
     def body(self, account: Account, folder: str, uid: int, background: bool = False) -> tuple[str | None, str | None]:
         m = next((x for x in self._all(account) if x.folder == folder and x.uid == uid), None)
         return (m.body_text, m.body_html) if m else (None, None)
+
+
+class DemoSender:
+    """Sends nothing, anywhere: the demo only pretends, so nobody can be mailed by trying the app."""
+
+    def __init__(self):
+        self.sent = []
+
+    def send(self, account, secret, mail) -> bytes:
+        self.sent.append(mail)
+        return b""

@@ -19,10 +19,11 @@ from PySide6.QtWidgets import (
 
 from .. import APP_NAME
 from ..application.errors import ApplicationError
-from ..application.records import MessageRecord, ThreadRecord
+from ..application.records import DraftRecord, MessageRecord, ThreadRecord
 from ..application.services import MailService
 from . import icons, theme
 from .account_dialog import AccountDialog
+from .compose_dialog import ComposeDialog
 from .i18n import _
 from .views.common import Card, button, icon_button, label, primary_button
 
@@ -269,7 +270,34 @@ class _OpenTask(QRunnable):
             pass
 
 
+class _SendTask(QRunnable):
+    """Sends a message off the UI thread; the draft comes back with the answer so nothing typed is ever lost."""
+
+    class Signals(QObject):
+        done = Signal(object, str)  # (the DraftRecord, what went wrong or "")
+
+    def __init__(self, service: MailService, draft: DraftRecord):
+        super().__init__()
+        self.signals = self.Signals()
+        self._service, self._draft = service, draft
+
+    def run(self):
+        try:
+            self._service.send(self._draft)
+            problem = ""
+        except ApplicationError as e:
+            problem = str(e)
+        except Exception as e:  # noqa: BLE001
+            problem = f"{type(e).__name__}: {e}"
+        try:
+            self.signals.done.emit(self._draft, problem)
+        except RuntimeError:  # the window is gone
+            pass
+
+
 class MainWindow(QMainWindow):
+    SEND_DELAY = 8  # seconds to change your mind after pressing Send
+
     def __init__(self, service: MailService, auto_sync: bool = False):
         super().__init__()
         self.service = service
@@ -281,6 +309,9 @@ class MainWindow(QMainWindow):
         self._job: _SyncJob | None = None
         self._open_seq = 0  # numbers the open requests, so a slow answer to an old click is ignored
         self._open_tasks: set[_OpenTask] = set()
+        self._composers: list[ComposeDialog] = []
+        self._send_tasks: set[_SendTask] = set()
+        self._pending: tuple[DraftRecord, int] | None = None  # (message waiting to go out, seconds left)
         self.setWindowTitle(APP_NAME)
         self.resize(1240, 780)
         self.setMinimumSize(720, 460)
@@ -321,7 +352,10 @@ class MainWindow(QMainWindow):
         side = QVBoxLayout(self.sidebar)
         side.setContentsMargins(10, 14, 10, 10)
         side.setSpacing(10)
+        self.compose_button = primary_button(_("New message"), "edit")
+        self.compose_button.clicked.connect(self.compose)
         side.addLayout(brand)
+        side.addWidget(self.compose_button)
         side.addWidget(scroll, 1)
         side.addWidget(self.status)
         side.addLayout(foot)
@@ -387,6 +421,12 @@ class MainWindow(QMainWindow):
         self.banner.hide()
         self.star_button = icon_button("star", _("Flag this message"), checkable=True)
         self.star_button.clicked.connect(self._toggle_flag)
+        self.reply_button = icon_button("reply", _("Reply"))
+        self.reply_all_button = icon_button("reply-all", _("Reply to all"))
+        self.forward_button = icon_button("forward", _("Forward"))
+        self.reply_button.clicked.connect(lambda: self.reply(False))
+        self.reply_all_button.clicked.connect(lambda: self.reply(True))
+        self.forward_button.clicked.connect(self.forward)
         self.reader = QTextBrowser()
         self.reader.setOpenLinks(False)
         self.reader.setFrameShape(QFrame.NoFrame)
@@ -403,7 +443,8 @@ class MainWindow(QMainWindow):
         who.addWidget(self.sender_when, 0, Qt.AlignTop)
         top = QHBoxLayout()
         top.addWidget(self.subject, 1)
-        top.addWidget(self.star_button, 0, Qt.AlignTop)
+        for tool in (self.reply_button, self.reply_all_button, self.forward_button, self.star_button):
+            top.addWidget(tool, 0, Qt.AlignTop)
         rule = QFrame(objectName="rule")
         rule.setFixedHeight(1)
         message = QWidget()
@@ -429,9 +470,22 @@ class MainWindow(QMainWindow):
         self.reader_pages.addWidget(message)
         card = Card(padding=0)
         card.add(self.reader_pages, 1)
+        self.undo_text = QLabel(wordWrap=True)
+        self.undo_button = button(_("Undo"))
+        self.undo_button.clicked.connect(self._undo_send)
+        self.undo_bar = QFrame(objectName="banner")
+        undo_row = QHBoxLayout(self.undo_bar)
+        undo_row.setContentsMargins(14, 8, 8, 8)
+        undo_row.addWidget(self.undo_text, 1)
+        undo_row.addWidget(self.undo_button)
+        self.undo_bar.hide()
+        self._undo_timer = QTimer(self)
+        self._undo_timer.setInterval(1000)
+        self._undo_timer.timeout.connect(self._undo_tick)
         right = QWidget()
         right_layout = QVBoxLayout(right)
         right_layout.setContentsMargins(8, 18, 16, 16)
+        right_layout.addWidget(self.undo_bar)
         right_layout.addWidget(card)
 
         self.split = QSplitter(Qt.Horizontal)
@@ -451,8 +505,8 @@ class MainWindow(QMainWindow):
         welcome.setSpacing(12)
         self.welcome_icon = QLabel(alignment=Qt.AlignCenter)
         headline = QLabel(_("Welcome to Missive"), objectName="pageTitle", alignment=Qt.AlignCenter)
-        intro = label(_("Add your mail account to start reading. Missive only reads: it never sends, moves, "
-                        "deletes or marks anything."), "muted")
+        intro = label(_("Add your mail account to start. Missive reads your mail without changing it, and sends "
+                        "only what you write yourself."), "muted")
         intro.setWordWrap(True)
         intro.setAlignment(Qt.AlignCenter)
         intro.setMaximumWidth(440)
@@ -496,7 +550,9 @@ class MainWindow(QMainWindow):
             f"a {{ color: {t.accent}; }} blockquote {{ color: {t.muted}; border-left: 3px solid {t.border}; "
             f"margin-left: 0; padding-left: 10px; }}")
         self.banner.setStyleSheet(f"QFrame#banner {{ background: {t.accent_soft}; border-radius: 9px; }}")
+        self.undo_bar.setStyleSheet(f"QFrame#banner {{ background: {t.accent_soft}; border-radius: 9px; }}")
         self.notice.setStyleSheet(f"color: {t.text};")
+        self.undo_text.setStyleSheet(f"color: {t.text};")
         self.busy.setStyleSheet(
             f"QProgressBar {{ background: transparent; border: none; }}"
             f"QProgressBar::chunk {{ background: {t.accent}; border-radius: 1px; }}")
@@ -645,6 +701,7 @@ class MainWindow(QMainWindow):
         self.reader.setHtml("")
         self.reader.setPlaceholderText(_("Loading…"))
         self.reader_pages.setCurrentIndex(1)
+        self._set_reply_enabled(False)
         task = _OpenTask(self.service, key, self.load_images, self._open_seq)
         self._open_tasks.add(task)
         task.signals.done.connect(lambda seq, record, problem, t=task: self._opened(seq, record, problem, t))
@@ -679,7 +736,12 @@ class MainWindow(QMainWindow):
         self.load_button.setVisible(bool(blocked))
         self.banner.setVisible(bool(blocked))
         self.reader_pages.setCurrentIndex(1)
+        self._set_reply_enabled(True)
         self.refresh_folders_counts()
+
+    def _set_reply_enabled(self, on: bool):
+        for tool in (self.reply_button, self.reply_all_button, self.forward_button):
+            tool.setEnabled(on and self.service.can_send())
 
     def _clear_reader(self):
         self._record = None
@@ -693,6 +755,7 @@ class MainWindow(QMainWindow):
         self.banner.setVisible(False)
         self.reader.setHtml("")
         self.reader_pages.setCurrentIndex(0)
+        self._set_reply_enabled(False)
 
     def _load_pictures(self):
         if self._record:
@@ -712,6 +775,89 @@ class MainWindow(QMainWindow):
         answer = QMessageBox.question(self, APP_NAME, _("Open this link?\n\n{url}").format(url=target))
         if answer == QMessageBox.Yes:
             QDesktopServices.openUrl(url)
+
+    # ---- writing ----
+
+    def _open_composer(self, draft: DraftRecord):
+        dialog = ComposeDialog(self.service, draft, self)
+        dialog.send_requested.connect(self._queue_send)
+        dialog.destroyed.connect(lambda _o=None, d=dialog: self._composers.remove(d) if d in self._composers else None)
+        self._composers.append(dialog)
+        dialog.show()
+        return dialog
+
+    def compose(self):
+        """A new message from the account being looked at (or the first one)."""
+        scope = self._scope
+        try:
+            self._open_composer(self.service.new_draft(scope[0] if scope != ALL_INBOXES else None))
+        except ApplicationError as e:
+            QMessageBox.warning(self, APP_NAME, _(str(e)))
+
+    def _key(self):
+        r = self._record
+        return (r.account_id, r.folder, r.uid) if r else None
+
+    def reply(self, everyone: bool):
+        if self._key():
+            self._open_composer(self.service.reply_draft(self._key(), everyone))
+
+    def forward(self):
+        if self._key():
+            self._open_composer(self.service.forward_draft(self._key()))
+
+    def _queue_send(self, draft: DraftRecord):
+        """Pressing Send starts a countdown, so a slip can still be taken back; then the message goes out."""
+        if self._pending is not None:  # one already waiting: it goes now, this one takes its place
+            self._send_now(self._pending[0])
+        self._pending = (draft, self.SEND_DELAY)
+        self.undo_bar.show()
+        self._undo_tick(first=True)
+        if self.SEND_DELAY <= 0:
+            return self._undo_tick()
+        self._undo_timer.start()
+
+    def _undo_tick(self, first: bool = False):
+        if self._pending is None:
+            return
+        draft, left = self._pending
+        if not first:
+            left -= 1
+            self._pending = (draft, left)
+        if left <= 0:
+            self._undo_timer.stop()
+            self._pending = None
+            self.undo_bar.hide()
+            return self._send_now(draft)
+        self.undo_text.setText(_("Sending to {to} in {n} s…").format(to=draft.to.split(",")[0].strip() or draft.cc,
+                                                                    n=left))
+
+    def _undo_send(self):
+        """Take the message back: the compose window comes back with everything in it."""
+        if self._pending is None:
+            return
+        draft, _left = self._pending
+        self._pending = None
+        self._undo_timer.stop()
+        self.undo_bar.hide()
+        self._open_composer(draft)
+        self.status.setText(_("Not sent"))
+
+    def _send_now(self, draft: DraftRecord):
+        self.status.setText(_("Sending…"))
+        task = _SendTask(self.service, draft)
+        self._send_tasks.add(task)
+        task.signals.done.connect(lambda d, problem, t=task: self._sent(d, problem, t))
+        QThreadPool.globalInstance().start(task)
+
+    def _sent(self, draft: DraftRecord, problem: str, task: _SendTask):
+        self._send_tasks.discard(task)
+        if not problem:
+            self.status.setText(_("Message sent"))
+            return
+        self.status.setText(_("Couldn't send the message"))
+        self._open_composer(draft)  # what was typed is never lost
+        QMessageBox.warning(self, APP_NAME, _("The message wasn't sent:\n\n{why}").format(why=_(problem)))
 
     # ---- accounts and settings ----
 
@@ -805,6 +951,11 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event):
         self._auto_timer.stop()
         self._open_seq += 1  # whatever is still loading is no longer wanted
+        if self._pending is not None:  # Send was pressed: closing the window doesn't take it back
+            draft, _left = self._pending
+            self._pending = None
+            self._undo_timer.stop()
+            self._send_now(draft)
         self._stop_sync()
         QThreadPool.globalInstance().waitForDone(5000)
         super().closeEvent(event)
