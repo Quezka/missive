@@ -22,10 +22,16 @@ python -m venv .venv && .venv/bin/pip install -r requirements.txt
 - The IMAP adapter only uses `EXAMINE` and `BODY.PEEK`, so looking at mail never marks it read.
 - Russian and Italian translations, like the rest of the suite.
 
+## Accounts
+
+Add an account from the app: an address and a password, or **Sign in with Google / Microsoft** in your browser
+(OAuth, no password; see [docs/OAUTH.md](docs/OAUTH.md) for the one-time client ID setup). Passwords and sign-in
+tokens live in the system keyring.
+
 ## Not yet (see CHANGELOG for the plan)
 
-Adding accounts from the UI (the keyring plumbing is there), writing and sending, undo-send, snooze,
-rules, keyboard shortcuts, OAuth for Google and Microsoft, suite integration (mail → Quire task, invite →
+Writing and sending, undo-send, snooze,
+rules, keyboard shortcuts, suite integration (mail → Quire task, invite →
 Quire event, "Edit in Ligature"), packaging (.deb, Windows installer), an Android app.
 
 ## Architecture

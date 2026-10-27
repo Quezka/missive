@@ -17,6 +17,28 @@ from missive.infrastructure.sqlite_store import SqliteStore
 from tests.test_imap import FakeImap
 
 
+class FakeOAuth:
+    """Stands in for Google / Microsoft: no browser, no network, no real account."""
+
+    def __init__(self, configured=("google", "microsoft")):
+        self.configured = configured
+        self.asked = []
+        self.cancelled = False
+
+    def available(self, provider):
+        return provider in self.configured
+
+    def authorize(self, provider, address):
+        self.asked.append((provider, address))
+        return f"refresh-for-{provider}"
+
+    def cancel(self):
+        self.cancelled = True
+
+    def access_token(self, provider, refresh_token):
+        return f"access-from-{refresh_token}"
+
+
 def draft(**kw):
     base = dict(name="Home", address="me@gmail.com", host="imap.gmail.com", port=993, username="me@gmail.com",
                 password="app-secret")
@@ -30,7 +52,8 @@ def make(source=None):
 
 def test_known_providers_and_the_imap_dot_guess():
     assert guess_server("a@gmail.com").host == "imap.gmail.com" and guess_server("a@gmail.com").app_password
-    assert guess_server("a@outlook.com").unsupported == "oauth"
+    assert guess_server("a@outlook.com").oauth == "microsoft" and guess_server("a@gmail.com").oauth == "google"
+    assert guess_server("a@outlook.com").host == "outlook.office365.com" and not guess_server("a@libero.it").oauth
     assert guess_server("a@libero.it").host == "imapmail.libero.it"
     assert guess_server("a@school.example.edu").host == "imap.school.example.edu"
     assert guess_server("not an address") is None and not valid_address("a@b") and valid_address("a@b.co")
@@ -113,3 +136,91 @@ def test_a_server_that_cannot_be_reached_says_so():
     service, _ = make(ImapSource(lambda i: "x", connect=connect))
     with pytest.raises(SourceError, match="Name or service"):
         service.check_account(draft())
+
+
+# ---- signing in with Google or Microsoft ----
+
+def make_oauth(source=None, oauth=None):
+    oauth = oauth or FakeOAuth()
+    passwords = MemoryPasswords()
+    return MailService(SqliteStore(":memory:"), source or DemoSource(), passwords, oauth), passwords, oauth
+
+
+def test_the_service_says_which_sign_ins_are_set_up_and_which_server_they_use():
+    service, _, _ = make_oauth(oauth=FakeOAuth(configured=("google",)))
+    assert service.oauth_available("google") and not service.oauth_available("microsoft")
+    assert service.oauth_host("google") == "imap.gmail.com" and service.oauth_host("microsoft") == "outlook.office365.com"
+    assert not MailService(SqliteStore(":memory:"), DemoSource(), MemoryPasswords()).oauth_available("google")
+    assert service.guess_server("me@outlook.com").oauth == "microsoft"
+
+
+def test_authorizing_asks_the_provider_for_the_typed_address():
+    service, _, oauth = make_oauth()
+    assert service.authorize("microsoft", " me@outlook.com ") == "refresh-for-microsoft"
+    assert oauth.asked == [("microsoft", "me@outlook.com")]
+
+
+@pytest.mark.parametrize("provider, address, text", [("password", "me@x.org", "Google or Microsoft"),
+                                                     ("google", "nope", "email address")])
+def test_authorizing_refuses_nonsense(provider, address, text):
+    service, _, oauth = make_oauth()
+    with pytest.raises(ApplicationError, match=text):
+        service.authorize(provider, address)
+    assert oauth.asked == []
+
+
+def test_authorizing_without_a_client_id_points_at_the_setup_guide():
+    service, _, _ = make_oauth(oauth=FakeOAuth(configured=()))
+    with pytest.raises(ApplicationError, match="OAUTH.md"):
+        service.authorize("google", "me@gmail.com")
+    with pytest.raises(ApplicationError, match="OAUTH.md"):
+        MailService(SqliteStore(":memory:"), DemoSource(), MemoryPasswords()).authorize("google", "me@gmail.com")
+
+
+def test_an_oauth_account_keeps_its_refresh_token_in_the_keyring_and_its_method_in_the_store():
+    service, passwords, _ = make_oauth()
+    record = service.add_new_account(draft(address="me@outlook.com", host="outlook.office365.com",
+                                           password="refresh-for-microsoft", auth="microsoft"))
+    stored = service._store.accounts()[0]
+    assert stored.auth == "microsoft" and stored.host == "outlook.office365.com"
+    assert passwords.get(record.id) == "refresh-for-microsoft"
+    assert "refresh-for-microsoft" not in repr(stored)
+
+
+def test_an_oauth_draft_without_a_token_or_with_an_unknown_method_is_refused():
+    service, _, _ = make_oauth()
+    with pytest.raises(ApplicationError, match="Sign in first"):
+        service.check_account(draft(password="", auth="google"))
+    with pytest.raises(ApplicationError, match="Enter the password"):
+        service.check_account(draft(password=""))
+    with pytest.raises(ApplicationError, match="how to sign in"):
+        service.check_account(draft(auth="carrier-pigeon"))
+
+
+def test_the_oauth_check_goes_through_xoauth2_not_through_a_password_login():
+    fake = FakeImap()
+    fake.login = lambda user, password: pytest.fail("a password login for an OAuth account")
+    used = {}
+
+    def authenticate(mechanism, callback):
+        used.update(mechanism=mechanism, first=callback(b""))
+    fake.authenticate = authenticate
+    oauth = FakeOAuth()
+    service, _, _ = make_oauth(ImapSource(lambda i: "x", connect=lambda a: fake, oauth=oauth), oauth)
+    service.check_account(draft(address="me@gmail.com", username="me@gmail.com", password="r1", auth="google"))
+    assert used == {"mechanism": "XOAUTH2",
+                    "first": b"user=me@gmail.com\x01auth=Bearer access-from-r1\x01\x01"}
+    assert [c[0] for c in fake.calls] == ["list", "logout"]  # still only looks at the folder list
+
+
+def test_an_oauth_account_on_a_source_with_no_oauth_says_it_is_not_set_up():
+    service, _, _ = make_oauth(ImapSource(lambda i: "x", connect=lambda a: FakeImap()))
+    with pytest.raises(SourceError, match="OAUTH.md"):
+        service.check_account(draft(password="r1", auth="google"))
+
+
+def test_cancelling_reaches_the_client():
+    service, _, oauth = make_oauth()
+    service.cancel_authorization()
+    assert oauth.cancelled
+    MailService(SqliteStore(":memory:"), DemoSource(), MemoryPasswords()).cancel_authorization()  # nothing to stop

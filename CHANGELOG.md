@@ -1,5 +1,9 @@
 # Changelog
 
+## [0.3.0] - 2026-10-27
+
+Sign in with Google or Microsoft in your browser, no password (OAuth 2.0 with PKCE, then IMAP XOAUTH2): Gmail and Google Workspace, Outlook.com, Hotmail and Microsoft 365. Missive keeps only a refresh token in the system keyring. The Add account screen has a "Sign in with" choice that follows the address (Outlook and Hotmail now work; a school on Google can be picked by hand). The client IDs are yours, made once for free: see docs/OAUTH.md. Gmail still works with an app password. Existing accounts keep working (the database gains an `auth` column by itself). Still read-only.
+
 ## [0.2.1] - 2026-10-27
 
 Fixed: the compact text size now reaches labels, buttons, menus and lists too (the desktop theme was keeping them at the system's larger size), so the whole interface really is smaller.

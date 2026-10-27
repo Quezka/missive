@@ -104,9 +104,11 @@ def test_with_no_account_a_welcome_page_leads_to_account_setup(app):
     assert "app password" not in dialog.hint.text()
     dialog.address.setText("me@gmail.com")
     assert "app password" in dialog.hint.text()
-    dialog.address.setText("me@outlook.com")
-    assert not dialog.add_button.isEnabled() and "OAuth" in dialog.hint.text()
+    dialog.address.setText("me@outlook.com")  # Microsoft only takes OAuth, and this app has no client ID
+    assert dialog.auth() == "microsoft" and not dialog.add_button.isEnabled() and "client ID" in dialog.hint.text()
+    assert dialog.draft().host == "outlook.office365.com"
     dialog.address.setText("me@libero.it")
+    assert dialog.auth() == "password" and dialog.draft().host == "imapmail.libero.it"
     dialog.add_button.click()  # checks on a worker thread, then saves on this one
     _settle(app, lambda: dialog.added is not None)
     assert dialog.added is not None and dialog.added.address == "me@libero.it"
@@ -134,3 +136,92 @@ def test_a_wrong_password_shows_the_server_reason_and_adds_nothing(app):
     _settle(app, lambda: not dialog.error.isHidden())
     assert "AUTHENTICATIONFAILED" in dialog.error.text() and service.accounts() == []
     assert dialog.add_button.isEnabled() and dialog.result() == 0
+
+
+def _oauth_dialog(app, oauth, address="me@outlook.com"):
+    from missive.application.services import MailService
+    from missive.infrastructure.demo_source import DemoSource
+    from missive.infrastructure.passwords import MemoryPasswords
+    from missive.infrastructure.sqlite_store import SqliteStore
+    from missive.presentation.account_dialog import AccountDialog
+    service = MailService(SqliteStore(":memory:"), DemoSource(), MemoryPasswords(), oauth)
+    dialog = AccountDialog(service)
+    dialog.address.setText(address)
+    return service, dialog
+
+
+def test_signing_in_with_microsoft_needs_no_password_and_keeps_the_token(app):
+    from tests.test_accounts import FakeOAuth
+    service, dialog = _oauth_dialog(app, FakeOAuth())
+    assert dialog.auth() == "microsoft" and not dialog.form.isRowVisible(dialog.password)
+    assert dialog.add_button.text() == "Sign in with Microsoft" and dialog.add_button.isEnabled()
+    dialog.add_button.click()
+    _settle(app, lambda: dialog.added is not None)
+    assert dialog.added.address == "me@outlook.com"
+    stored = service._store.accounts()[0]
+    assert stored.auth == "microsoft" and service._passwords.get(stored.id) == "refresh-for-microsoft"
+
+
+def test_gmail_defaults_to_the_app_password_until_google_sign_in_is_set_up(app):
+    from tests.test_accounts import FakeOAuth
+    _, plain = _oauth_dialog(app, FakeOAuth(configured=()), "me@gmail.com")
+    assert plain.auth() == "password" and "app password" in plain.hint.text()
+    plain.method.setCurrentIndex(plain.method.findData("google"))
+    plain.method.activated.emit(plain.method.currentIndex())
+    assert not plain.add_button.isEnabled() and "client ID" in plain.hint.text()
+    _, ready = _oauth_dialog(app, FakeOAuth(), "me@gmail.com")
+    assert ready.auth() == "google" and ready.add_button.text() == "Sign in with Google"
+    ready.method.setCurrentIndex(ready.method.findData("password"))  # the user can still choose a password
+    ready.method.activated.emit(ready.method.currentIndex())
+    assert ready.auth() == "password" and ready.form.isRowVisible(ready.password)
+
+
+def test_a_school_on_google_can_be_chosen_by_hand_and_uses_gmails_server(app):
+    from tests.test_accounts import FakeOAuth
+    _, dialog = _oauth_dialog(app, FakeOAuth(), "me@school.example.edu")
+    assert dialog.auth() == "password" and dialog.draft().host == "imap.school.example.edu"
+    dialog.method.setCurrentIndex(dialog.method.findData("google"))
+    dialog.method.activated.emit(dialog.method.currentIndex())
+    assert dialog.draft().host == "imap.gmail.com" and dialog.add_button.isEnabled()
+
+
+def test_closing_the_dialog_while_the_browser_is_open_stops_the_wait(app):
+    import threading
+    from missive.application.errors import SourceError
+    from tests.test_accounts import FakeOAuth
+
+    class Waiting(FakeOAuth):
+        def __init__(self):
+            super().__init__()
+            self.waiting = threading.Event()
+            self.stop = threading.Event()
+
+        def authorize(self, provider, address):
+            self.waiting.set()
+            if not self.stop.wait(10):
+                raise AssertionError("never cancelled")
+            raise SourceError("The sign-in was cancelled.")
+
+        def cancel(self):
+            self.stop.set()
+
+    oauth = Waiting()
+    service, dialog = _oauth_dialog(app, oauth)
+    dialog.add_button.click()
+    _settle(app, oauth.waiting.is_set)
+    assert dialog.add_button.text() == "Waiting for your browser…" and not dialog.add_button.isEnabled()
+    dialog.reject()  # must come back at once instead of hanging for minutes
+    assert oauth.stop.is_set() and dialog.added is None and service.accounts() == []
+
+
+def test_a_refused_sign_in_shows_why_and_adds_nothing(app):
+    from missive.application.errors import SourceError
+    from tests.test_accounts import FakeOAuth
+
+    class Refusing(FakeOAuth):
+        def authorize(self, provider, address):
+            raise SourceError("The sign-in was cancelled.")
+    service, dialog = _oauth_dialog(app, Refusing())
+    dialog.add_button.click()
+    _settle(app, lambda: not dialog.error.isHidden())
+    assert "cancelled" in dialog.error.text() and service.accounts() == [] and dialog.add_button.isEnabled()

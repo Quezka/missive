@@ -20,9 +20,31 @@ class MailSource(Protocol):
         """(plain text, HTML) of one message."""
         ...
 
-    def check(self, account: Account, password: str) -> None:
-        """Sign in with this password and look at the folder list; raises SourceError when it fails.
+    def check(self, account: Account, secret: str) -> None:
+        """Sign in with this secret (the password, or the OAuth refresh token for a Google or Microsoft
+        account) and look at the folder list; raises SourceError when it fails.
         Network only (no store access), so it may run on a worker thread."""
+        ...
+
+
+class OAuthClient(Protocol):
+    """Signing in to Google or Microsoft without a password: the user approves in their browser."""
+
+    def available(self, provider: str) -> bool:
+        """Whether this provider's client ID has been set up."""
+        ...
+
+    def authorize(self, provider: str, address: str) -> str:
+        """Open the browser, wait for the user to approve, and return the refresh token (a secret that
+        goes to the keyring). Blocks for up to a few minutes, so run it on a worker thread."""
+        ...
+
+    def cancel(self) -> None:
+        """Stop an `authorize` that is waiting for the browser (it then raises SourceError)."""
+        ...
+
+    def access_token(self, provider: str, refresh_token: str) -> str:
+        """A short-lived access token for IMAP, from the refresh token."""
         ...
 
 

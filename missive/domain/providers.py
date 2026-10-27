@@ -10,12 +10,16 @@ class Server:
     host: str
     port: int = 993
     app_password: bool = False  # the provider wants an app-specific password, not the account's own
-    unsupported: str = ""  # a reason the provider can't be used yet ("oauth")
+    oauth: str = ""  # "google" or "microsoft" when the provider offers OAuth sign-in (the better way)
+
+
+AUTH_METHODS = ("password", "google", "microsoft")
+OAUTH_HOSTS = {"google": "imap.gmail.com", "microsoft": "outlook.office365.com"}  # for custom domains on them
 
 
 PROVIDERS: dict[str, Server] = {
-    "gmail.com": Server("imap.gmail.com", app_password=True),
-    "googlemail.com": Server("imap.gmail.com", app_password=True),
+    "gmail.com": Server("imap.gmail.com", app_password=True, oauth="google"),
+    "googlemail.com": Server("imap.gmail.com", app_password=True, oauth="google"),
     "icloud.com": Server("imap.mail.me.com", app_password=True),
     "me.com": Server("imap.mail.me.com", app_password=True),
     "mac.com": Server("imap.mail.me.com", app_password=True),
@@ -29,9 +33,9 @@ PROVIDERS: dict[str, Server] = {
     "inbox.ru": Server("imap.mail.ru", app_password=True),
     "bk.ru": Server("imap.mail.ru", app_password=True),
     "list.ru": Server("imap.mail.ru", app_password=True),
-    "outlook.com": Server("outlook.office365.com", unsupported="oauth"),
-    "hotmail.com": Server("outlook.office365.com", unsupported="oauth"),
-    "live.com": Server("outlook.office365.com", unsupported="oauth"),
+    **{d: Server("outlook.office365.com", oauth="microsoft")
+       for d in ("outlook.com", "hotmail.com", "live.com", "msn.com", "outlook.it", "hotmail.it", "live.it",
+                 "outlook.fr", "hotmail.fr", "outlook.de", "hotmail.de", "outlook.es", "hotmail.es")},
     "libero.it": Server("imapmail.libero.it"),
     "virgilio.it": Server("box.virgilio.it"),
     "tiscali.it": Server("imap.tiscali.it"),

@@ -5,6 +5,7 @@ from pathlib import Path
 
 from .application.services import MailService
 from .infrastructure.demo_source import HOME, SCHOOL, DemoSource
+from .infrastructure.oauth import OAuthClient, load_client_ids
 from .infrastructure.passwords import KeyringPasswords, MemoryPasswords
 from .infrastructure.sqlite_store import SqliteStore
 
@@ -27,8 +28,9 @@ def build_services(demo: bool = False, store=None, source=None, passwords=None) 
         service.sync()
         return service
     store = store or SqliteStore(data_dir() / "mail.db")
+    oauth = OAuthClient(load_client_ids(data_dir() / "oauth.json"))
     if source is None:
         from .infrastructure.imap_source import ImapSource
 
-        source = ImapSource((passwords or KeyringPasswords()).get)
-    return MailService(store, source, passwords or KeyringPasswords())
+        source = ImapSource((passwords or KeyringPasswords()).get, oauth=oauth)
+    return MailService(store, source, passwords or KeyringPasswords(), oauth)

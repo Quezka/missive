@@ -27,6 +27,7 @@ class Account:
     port: int = 993
     username: str = ""
     color: str = "#5b5bd6"
+    auth: str = "password"  # how it signs in: "password" (also an app password), "google" or "microsoft" (OAuth)
 
 
 @dataclass(frozen=True)

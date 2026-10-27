@@ -11,6 +11,7 @@ from email.utils import getaddresses, parsedate_to_datetime
 
 from ..application.errors import SourceError
 from ..domain import Account, Address, Folder, Message, text_of
+from .oauth import xoauth2
 
 HEADER_FIELDS = "DATE FROM TO CC SUBJECT MESSAGE-ID IN-REPLY-TO REFERENCES"
 ROLES = {"\\inbox": "inbox", "\\sent": "sent", "\\drafts": "drafts", "\\trash": "trash",
@@ -73,28 +74,40 @@ def _reason(e: Exception) -> str:
 
 
 class ImapSource:
-    """MailSource over IMAP-over-TLS. `passwords` maps an account id to its password (the OS
-    keyring in the app); `connect` makes the connection (replaced in tests)."""
+    """MailSource over IMAP-over-TLS. `passwords` maps an account id to its secret (the OS keyring in
+    the app): the password, or for a Google or Microsoft account the OAuth refresh token, which `oauth`
+    turns into an access token for XOAUTH2. `connect` makes the connection (replaced in tests)."""
 
-    def __init__(self, passwords, connect=None):
+    def __init__(self, passwords, connect=None, oauth=None):
         self._passwords = passwords
         self._connect = connect or self._real_connect
+        self._oauth = oauth
 
     @staticmethod
     def _real_connect(account: Account):
         return imaplib.IMAP4_SSL(account.host, account.port)
 
-    def _session(self, account: Account, password: str | None = None):
+    def _session(self, account: Account, secret: str | None = None):
+        conn = None
         try:
             conn = self._connect(account)
-            conn.login(account.username or account.address,
-                       self._passwords(account.id) if password is None else password)
+            secret = self._passwords(account.id) if secret is None else secret
+            user = account.username or account.address
+            if account.auth == "password":
+                conn.login(user, secret)
+            else:
+                if self._oauth is None:
+                    raise SourceError("This sign-in isn't set up yet: add its client ID (see docs/OAUTH.md).")
+                token = self._oauth.access_token(account.auth, secret)
+                conn.authenticate("XOAUTH2", lambda _challenge: xoauth2(user, token))
             return conn
         except (imaplib.IMAP4.error, OSError) as e:
+            if conn is not None:
+                self._close(conn)
             raise SourceError(f"{account.name}: {_reason(e)}") from e
 
-    def check(self, account: Account, password: str) -> None:
-        conn = self._session(account, password)
+    def check(self, account: Account, secret: str) -> None:
+        conn = self._session(account, secret)
         try:
             status, _ = conn.list()
             if status != "OK":

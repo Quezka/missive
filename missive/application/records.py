@@ -67,7 +67,7 @@ class ServerGuess:
     host: str
     port: int
     app_password: bool  # the provider wants an app-specific password
-    unsupported: str  # "oauth" when the provider only allows OAuth sign-in
+    oauth: str  # "google" or "microsoft" when the provider offers OAuth sign-in
 
 
 @dataclass(frozen=True)
@@ -78,4 +78,5 @@ class AccountDraft:
     host: str
     port: int
     username: str
-    password: str
+    password: str  # for an OAuth account: the refresh token, once the user has approved
+    auth: str = "password"  # "password", "google" or "microsoft"

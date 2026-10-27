@@ -58,3 +58,24 @@ def test_a_message_is_stored_once_even_if_the_server_lists_it_again():
     m = Message(acct.id, "INBOX", 1, "Hi", Address("b@x.org"), datetime(2026, 1, 1))
     assert store.save_messages([m]) == 1 and store.save_messages([m]) == 0
     assert store.max_uid(acct.id, "INBOX") == 1
+
+
+def test_a_database_from_before_oauth_gains_the_auth_column_and_keeps_its_accounts(tmp_path):
+    import sqlite3
+    path = tmp_path / "old.db"
+    old = sqlite3.connect(path)
+    old.executescript("""
+        CREATE TABLE accounts (id INTEGER PRIMARY KEY, name TEXT NOT NULL, address TEXT NOT NULL, host TEXT NOT NULL,
+            port INTEGER NOT NULL DEFAULT 993, username TEXT NOT NULL DEFAULT '', color TEXT NOT NULL DEFAULT '#5b5bd6');
+        INSERT INTO accounts (name, address, host) VALUES ('Old', 'me@libero.it', 'imapmail.libero.it');
+    """)
+    old.commit()
+    old.close()
+    from missive.infrastructure.sqlite_store import SqliteStore
+    store = SqliteStore(path)
+    assert [(a.address, a.auth) for a in store.accounts()] == [("me@libero.it", "password")]
+    from missive.domain import Account
+    saved = store.add_account(Account(0, "G", "me@gmail.com", "imap.gmail.com", auth="google"))
+    assert [a.auth for a in store.accounts()] == ["password", "google"] and saved.auth == "google"
+    store.close()
+    assert [a.auth for a in SqliteStore(path).accounts()] == ["password", "google"]  # reopening is harmless

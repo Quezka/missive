@@ -2,9 +2,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from ..domain import Account, Message, clean_html, group, guess_server, link_targets, text_of, valid_address
+from ..domain import (AUTH_METHODS, OAUTH_HOSTS, Account, Message, clean_html, group, guess_server, link_targets,
+                      text_of, valid_address)
 from .errors import ApplicationError, NotFound, SourceError
-from .ports import MailSource, MessageStore, PasswordStore
+from .ports import MailSource, MessageStore, OAuthClient, PasswordStore
 from .records import AccountDraft, AccountRecord, FolderRecord, MessageRecord, ServerGuess, SyncReport, ThreadRecord
 
 PER_FOLDER = 200  # how many of the newest messages a folder shows
@@ -13,10 +14,12 @@ PER_FOLDER = 200  # how many of the newest messages a folder shows
 class MailService:
     """Use cases for reading mail: fetch what's new, list conversations, open a message."""
 
-    def __init__(self, store: MessageStore, source: MailSource, passwords: PasswordStore | None = None):
+    def __init__(self, store: MessageStore, source: MailSource, passwords: PasswordStore | None = None,
+                 oauth: OAuthClient | None = None):
         self._store = store
         self._source = source
         self._passwords = passwords
+        self._oauth = oauth
 
     # ---- accounts and folders ----
 
@@ -33,7 +36,30 @@ class MailService:
 
     def guess_server(self, address: str) -> ServerGuess | None:
         server = guess_server(address)
-        return ServerGuess(server.host, server.port, server.app_password, server.unsupported) if server else None
+        return ServerGuess(server.host, server.port, server.app_password, server.oauth) if server else None
+
+    def oauth_host(self, provider: str) -> str:
+        """The IMAP server for a Google or Microsoft account, even on the user's own domain."""
+        return OAUTH_HOSTS.get(provider, "")
+
+    def oauth_available(self, provider: str) -> bool:
+        return self._oauth is not None and self._oauth.available(provider)
+
+    def cancel_authorization(self) -> None:
+        """The user closed the sign-in window while the browser was open."""
+        if self._oauth is not None:
+            self._oauth.cancel()
+
+    def authorize(self, provider: str, address: str) -> str:
+        """Let the user approve Missive in their browser; returns the refresh token to keep in the keyring.
+        Waits for the user, so run it on a worker thread."""
+        if provider not in AUTH_METHODS or provider == "password":
+            raise ApplicationError("Choose Google or Microsoft to sign in without a password.")
+        if not valid_address(address.strip()):
+            raise ApplicationError("That doesn't look like an email address.")
+        if self._oauth is None or not self._oauth.available(provider):
+            raise ApplicationError("This sign-in isn't set up yet: add its client ID (see docs/OAUTH.md).")
+        return self._oauth.authorize(provider, address.strip())
 
     def _account_from(self, draft: AccountDraft, account_id: int = 0, color: str = "") -> Account:
         address = draft.address.strip()
@@ -44,11 +70,15 @@ class MailService:
             raise ApplicationError("Enter the mail server (for example imap.example.com).")
         if not 0 < draft.port < 65536:
             raise ApplicationError("The port must be a number between 1 and 65535.")
-        if not draft.password:
+        if draft.auth not in AUTH_METHODS:
+            raise ApplicationError("Choose how to sign in: password, Google or Microsoft.")
+        if not draft.password and draft.auth == "password":
             raise ApplicationError("Enter the password.")
+        if not draft.password:
+            raise ApplicationError("Sign in first, in your browser.")
         username = draft.username.strip()
         return Account(account_id, draft.name.strip() or address, address, host, draft.port,
-                       "" if username == address else username, color or self.COLORS[0])
+                       "" if username == address else username, color or self.COLORS[0], draft.auth)
 
     def check_account(self, draft: AccountDraft) -> None:
         """Try the sign-in without saving anything. Network only: safe on a worker thread."""

@@ -41,6 +41,11 @@
 
   <!-- Newest first. Every released version needs an entry. -->
   <releases>
+    <release version="0.3.0" date="2026-10-27">
+      <description>
+        <p>Sign in with Google or Microsoft in your browser, without a password: Gmail, Google Workspace, Outlook.com, Hotmail and Microsoft 365. Missive keeps only a sign-in token in the system keyring and is still read-only. You make the client IDs once (docs/OAUTH.md); Gmail also still works with an app password.</p>
+      </description>
+    </release>
     <release version="0.2.1" date="2026-10-27">
       <description>
         <p>Fixed: the compact text size now reaches labels, buttons, menus and lists too (the desktop theme was keeping them at the system's larger size), so the whole interface really is smaller.</p>

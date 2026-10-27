@@ -8,13 +8,13 @@ from pathlib import Path
 
 from ..domain import Account, Address, Folder, Message, text_of
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2  # 2: accounts.auth (password / google / microsoft)
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS accounts (
     id INTEGER PRIMARY KEY, name TEXT NOT NULL, address TEXT NOT NULL, host TEXT NOT NULL,
     port INTEGER NOT NULL DEFAULT 993, username TEXT NOT NULL DEFAULT '',
-    color TEXT NOT NULL DEFAULT '#5b5bd6'
+    color TEXT NOT NULL DEFAULT '#5b5bd6', auth TEXT NOT NULL DEFAULT 'password'
 );
 CREATE TABLE IF NOT EXISTS folders (
     account_id INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
@@ -51,9 +51,16 @@ class SqliteStore:
         self.conn.row_factory = sqlite3.Row
         self.conn.execute("PRAGMA foreign_keys = ON")
         self.conn.executescript(SCHEMA)
+        self._migrate()
         self.fts = self._make_search()
         self.conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
         self.conn.commit()
+
+    def _migrate(self) -> None:
+        """A database made before OAuth has no accounts.auth: add it (existing accounts use a password)."""
+        columns = {r["name"] for r in self.conn.execute("PRAGMA table_info(accounts)")}
+        if "auth" not in columns:
+            self.conn.execute("ALTER TABLE accounts ADD COLUMN auth TEXT NOT NULL DEFAULT 'password'")
 
     def close(self):
         self.conn.close()
@@ -69,15 +76,16 @@ class SqliteStore:
     # ---- accounts and folders ----
 
     def accounts(self) -> list[Account]:
-        return [Account(r["id"], r["name"], r["address"], r["host"], r["port"], r["username"], r["color"])
+        return [Account(r["id"], r["name"], r["address"], r["host"], r["port"], r["username"], r["color"],
+                        r["auth"])
                 for r in self.conn.execute("SELECT * FROM accounts ORDER BY id")]
 
     def add_account(self, a: Account) -> Account:
         with self.conn:
             cur = self.conn.execute(
-                "INSERT INTO accounts (name, address, host, port, username, color) VALUES (?,?,?,?,?,?)",
-                (a.name, a.address, a.host, a.port, a.username, a.color))
-        return Account(cur.lastrowid, a.name, a.address, a.host, a.port, a.username, a.color)
+                "INSERT INTO accounts (name, address, host, port, username, color, auth) VALUES (?,?,?,?,?,?,?)",
+                (a.name, a.address, a.host, a.port, a.username, a.color, a.auth))
+        return Account(cur.lastrowid, a.name, a.address, a.host, a.port, a.username, a.color, a.auth)
 
     def remove_account(self, account_id: int) -> None:
         with self.conn:
