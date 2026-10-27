@@ -20,6 +20,7 @@ python -m venv .venv && .venv/bin/pip install -r requirements.txt
   (they are how senders know you opened a message) until you press "Load pictures"; every link is shown
   with its real address and asks before it opens.
 - The IMAP adapter only uses `EXAMINE` and `BODY.PEEK`, so looking at mail never marks it read.
+- Checks for new mail in the background (on opening and every five minutes) and keeps the newest letters ready, so the window never waits for the server.
 - Russian and Italian translations, like the rest of the suite.
 
 ## Accounts
