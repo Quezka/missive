@@ -2,6 +2,8 @@
 
 ## [0.5.1] - 2026-10-27
 
+Fixed: a letter you open is marked read in the list at once (the dot and the bold go away, the unread counts drop, the list doesn't jump), even while its text is still loading.
+
 Fixed: pictures in mail did not show. Qt only draws pictures from files, so pictures on the internet never appeared even after Load pictures, and pictures sent inside the message (`cid:`) were never put back. Now pictures inside a message show at once (nothing is fetched, so nothing can track you; if they sit past the first 250 KB the message is fetched again in full), and Load pictures really fetches the internet ones, scaled to the window. Fetching has hard rules: only public addresses (a message can't make your computer contact your router, your NAS or localhost), no cookies, no cache, no referrer, 15 s and 8 MB per picture, at most 40 per message, and an old request is dropped the moment you open another letter.
 
 ## [0.5.0] - 2026-10-27

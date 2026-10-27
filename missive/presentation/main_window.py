@@ -682,6 +682,8 @@ class MainWindow(QMainWindow):
         background while the reader says so, and a newer click makes the older answer irrelevant."""
         self._open_seq += 1
         key = (account_id, folder, uid)
+        self.service.set_seen(key, True)  # looking at it is reading it: the list shows that at once
+        self._refresh_row(key)
         if not self.service.needs_fetch(*key):
             try:
                 return self._show(self.service.open(*key, self.load_images))
@@ -738,6 +740,23 @@ class MainWindow(QMainWindow):
         self.banner.setVisible(bool(blocked))
         self.reader_pages.setCurrentIndex(1)
         self._set_reply_enabled(True)
+        self._refresh_row((m.account_id, m.folder, m.uid))
+
+    def _refresh_row(self, key: tuple[int, str, int]):
+        """Redraw the conversation that holds this message (it may have just been read) and the counts around
+        it, without rebuilding the list: the scroll position and the selection stay where they are."""
+        for i in range(self.threads.count()):
+            item = self.threads.item(i)
+            r: ThreadRecord | None = item.data(THREAD)
+            if r is not None and key in r.keys:
+                fresh = self.service.thread_for(r.keys)
+                if fresh is not None:
+                    item.setData(THREAD, fresh)
+                break
+        records = [self.threads.item(i).data(THREAD) for i in range(self.threads.count())]
+        unread = sum(r.unread for r in records if r is not None)
+        self.subtitle.setText(_("{n} unread").format(n=unread) if unread else _("Nothing unread"))
+        self.threads.viewport().update()
         self.refresh_folders_counts()
 
     def _set_reply_enabled(self, on: bool):

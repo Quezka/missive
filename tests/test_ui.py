@@ -349,3 +349,35 @@ def test_opening_a_letter_that_must_be_fetched_waits_in_the_background_and_ignor
     _settle(app, lambda: len(window._open_tasks) == 0)
     assert window.subject.text() == "Dinner on Saturday?" and "pizza" in window.reader.toPlainText()
     window.close()
+
+
+def test_a_letter_you_open_is_marked_read_in_the_list_at_once_even_before_its_text_arrives(window, app):
+    before = window.nav[("all", None)].unread
+    row = row_of(window, "Dinner on Saturday?")  # unread, a single message
+    assert window.threads.item(row).data(THREAD).unread == 1
+    window.threads.setCurrentRow(row)
+    # no settling: the text may still be on its way, but the row and the counts change this instant
+    assert window.threads.item(row).data(THREAD).unread == 0
+    assert window.nav[("all", None)].unread == before - 1
+    _settle(app, lambda: window._record is not None)
+    assert window.threads.item(row).data(THREAD).unread == 0 and window.threads.currentRow() == row
+
+
+def test_opening_part_of_a_conversation_only_lowers_its_unread_count_by_the_letter_read(window, app):
+    row = row_of(window, "ER diagram homework")  # the demo's thread has two unread letters (1 and 3)
+    assert window.threads.item(row).data(THREAD).unread == 2
+    window.threads.setCurrentRow(row)  # opens the newest
+    assert window.threads.item(row).data(THREAD).unread == 1
+    _settle(app, lambda: window._record is not None)
+    assert "unread" in window.subtitle.text()
+
+
+def test_reading_a_letter_does_not_move_the_list(window, app):
+    bar = window.threads.verticalScrollBar()
+    window.resize(900, 300)  # short window: the list scrolls
+    app.processEvents()
+    bar.setValue(bar.maximum())
+    place = bar.value()
+    window.threads.setCurrentRow(window.threads.count() - 1)
+    _settle(app, lambda: window._record is not None)
+    assert bar.value() >= place - 2  # it stayed (an update of one row, not a rebuild from the top)

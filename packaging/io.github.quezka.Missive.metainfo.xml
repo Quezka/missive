@@ -43,7 +43,7 @@
   <releases>
     <release version="0.5.1" date="2026-10-27">
       <description>
-        <p>Fixed pictures in mail: pictures inside a message now show at once, and Load pictures really loads the ones on the internet, safely (public addresses only, no cookies, size and time limits).</p>
+        <p>A letter you open is marked read in the list at once. Fixed pictures in mail: pictures inside a message now show at once, and Load pictures really loads the ones on the internet, safely (public addresses only, no cookies, size and time limits).</p>
       </description>
     </release>
     <release version="0.5.0" date="2026-10-27">

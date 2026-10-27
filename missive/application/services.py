@@ -294,6 +294,13 @@ class MailService:
     def set_seen(self, key: tuple[int, str, int], seen: bool):
         self._store.set_seen(*key, seen)
 
+    def thread_for(self, keys: tuple[tuple[int, str, int], ...]) -> ThreadRecord | None:
+        """The conversation made of these messages as it is now (after one was read or flagged), so the list
+        can update that one row instead of being rebuilt."""
+        found = [m for k in keys if (m := self._store.message(*k)) is not None]
+        groups = group(found)
+        return _thread_record(groups[0]) if groups else None
+
     def toggle_flag(self, key: tuple[int, str, int]) -> bool:
         m = self._store.message(*key)
         if m is None:
