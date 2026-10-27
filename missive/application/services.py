@@ -115,24 +115,38 @@ class MailService:
 
     # ---- fetching ----
 
-    def sync(self, account_id: int | None = None) -> SyncReport:
-        """Fetch folders and the headers of new messages. Bodies come when a message is opened."""
+    def sync(self, account_id: int | None = None, progress=None) -> SyncReport:
+        """Fetch folders and the headers of new messages. Bodies come when a message is opened.
+
+        `progress(account name, folder, new so far)` is called before each folder; when it returns False the
+        sync stops there (the user closed the window). A folder that can't be read is skipped and reported;
+        an account that can't sign in is skipped too, and only when nothing at all could be read does
+        the first problem become an error."""
         new = folders = 0
+        problems: list[str] = []
+        first: SourceError | None = None
         for account in self._store.accounts():
             if account_id is not None and account.id != account_id:
                 continue
             try:
                 found = self._source.folders(account)
-                self._store.save_folders(found)
-                for folder in found:
-                    folders += 1
+            except Exception as e:  # a network or protocol problem, whatever its type
+                first = first or (e if isinstance(e, SourceError) else SourceError(f"{account.name}: {e}"))
+                problems.append(str(first))
+                continue
+            self._store.save_folders(found)
+            for folder in found:
+                if progress is not None and progress(account.name, folder.name, new) is False:
+                    return SyncReport(new, folders, tuple(problems))
+                try:
                     after = self._store.max_uid(account.id, folder.name)
                     new += self._store.save_messages(self._source.headers(account, folder.name, after))
-            except SourceError:
-                raise
-            except Exception as e:  # a network or protocol problem, whatever its type
-                raise SourceError(f"{account.name}: {e}") from e
-        return SyncReport(new, folders)
+                    folders += 1
+                except Exception as e:
+                    problems.append(f"{account.name} / {folder.name}: {e}")
+        if problems and folders == 0 and new == 0:
+            raise first or SourceError(problems[0])
+        return SyncReport(new, folders, tuple(problems))
 
     # ---- lists ----
 
@@ -146,6 +160,35 @@ class MailService:
         return [_thread_record(t) for t in group(messages)]
 
     # ---- one message ----
+
+    def needs_fetch(self, account_id: int, folder: str, uid: int) -> bool:
+        """Whether opening this message has to ask the server for its text (so the screen can wait politely)."""
+        m = self._store.message(account_id, folder, uid)
+        return m is not None and not m.fetched
+
+    def is_flagged(self, key: tuple[int, str, int]) -> bool:
+        m = self._store.message(*key)
+        return bool(m and m.flagged)
+
+    def prefetch(self, limit: int = 30, stop=None) -> int:
+        """Download the text of the newest messages of each inbox that haven't got it, so that opening them
+        is instant. A server that fails ends that account's turn; `stop()` returning True ends it all."""
+        done = 0
+        for account in self._store.accounts():
+            inboxes = [f.name for f in self._store.folders(account.id) if f.role == "inbox"]
+            for name in inboxes:
+                for m in self._store.messages(account.id, name, limit):
+                    if stop is not None and stop():
+                        return done
+                    if m.fetched:
+                        continue
+                    try:
+                        text, html = self._source.body(account, name, m.uid)
+                    except Exception:  # noqa: BLE001 (it will be fetched when the user opens it)
+                        break
+                    self._store.save_body(account.id, name, m.uid, text, html)
+                    done += 1
+        return done
 
     def open(self, account_id: int, folder: str, uid: int, load_images: bool = False,
              mark_seen: bool = True) -> MessageRecord:
@@ -180,11 +223,19 @@ class MailService:
 
 def _thread_record(t) -> ThreadRecord:
     last = t.latest
-    people = ", ".join(a.display.split(" ")[0] if a.name else a.email.split("@")[0] for a in t.participants[:3])
+    people = ", ".join(_first_name(a) for a in t.participants[:3])
     return ThreadRecord(t.id, last.account_id, t.subject or "(no subject)", people, last.snippet,
                         last.sent, t.unread, len(t.messages), t.flagged,
                         any(m.has_attachments for m in t.messages),
-                        tuple(m.key for m in t.messages))
+                        tuple(m.key for m in t.messages), last.sender.display, last.sender.email)
+
+
+def _first_name(a) -> str:
+    """"Anna Rossi" -> "Anna"; a title like "Prof." is skipped ("Prof. Rossi" -> "Rossi"); no name -> the address."""
+    if not a.name:
+        return a.email.split("@")[0]
+    words = a.display.split()
+    return next((w for w in words if not w.endswith(".")), words[0])
 
 
 def _message_record(m: Message, load_images: bool) -> MessageRecord:

@@ -1,5 +1,7 @@
 from datetime import datetime
 
+NOW = datetime(2026, 10, 26, 12, 0)
+
 from missive.application.errors import NotFound
 from missive.domain import Account, Address, Message
 from missive.infrastructure.sqlite_store import SqliteStore
@@ -79,3 +81,100 @@ def test_a_database_from_before_oauth_gains_the_auth_column_and_keeps_its_accoun
     assert [a.auth for a in store.accounts()] == ["password", "google"] and saved.auth == "google"
     store.close()
     assert [a.auth for a in SqliteStore(path).accounts()] == ["password", "google"]  # reopening is harmless
+
+
+# ---- background work: prefetching, partial failures, stopping, threads ----
+
+def test_prefetch_downloads_the_text_of_the_newest_inbox_mail_once(service):
+    fresh = sorted(service._store.messages(None, "INBOX", 50), key=lambda m: m.uid)
+    assert fresh and not any(m.fetched for m in fresh)  # a listing carries no bodies
+    first = service.prefetch()
+    assert first == 8  # the demo's eight inbox messages
+    assert not service.needs_fetch(fresh[0].account_id, "INBOX", fresh[0].uid)
+    assert service.prefetch() == 0  # nothing left to fetch
+
+
+def test_prefetch_can_be_stopped_and_gives_up_on_an_account_whose_server_fails(service):
+    assert service.prefetch(stop=lambda: True) == 0
+    from missive.application.services import MailService
+
+    class Failing:
+        def body(self, *a):
+            raise OSError("down")
+    broken = MailService(service._store, Failing(), None)
+    assert broken.prefetch() == 0  # no crash: the letters will be fetched when opened
+
+
+class PartlyBroken:
+    """A server where one folder can't be read."""
+
+    def __init__(self, inner, bad="Sent"):
+        self.inner, self.bad = inner, bad
+
+    def folders(self, account):
+        return self.inner.folders(account)
+
+    def headers(self, account, folder, after_uid):
+        if folder == self.bad:
+            raise OSError("folder is corrupt")
+        return self.inner.headers(account, folder, after_uid)
+
+
+def test_one_unreadable_folder_is_reported_and_the_rest_still_arrives():
+    from missive.application.services import MailService
+    from missive.domain import Account
+    from missive.infrastructure.demo_source import DemoSource
+    from missive.infrastructure.sqlite_store import SqliteStore
+    store = SqliteStore(":memory:")
+    store.add_account(Account(0, "School", "s@school.example", "imap.school.example"))
+    report = MailService(store, PartlyBroken(DemoSource(NOW))).sync()
+    assert report.new == 6 - 1 and len(report.problems) == 1 and "Sent" in report.problems[0]
+    assert "corrupt" in report.problems[0]
+
+
+def test_when_nothing_at_all_can_be_read_the_first_problem_becomes_an_error():
+    from missive.application.errors import SourceError
+    from missive.application.services import MailService
+    from missive.domain import Account
+    from missive.infrastructure.sqlite_store import SqliteStore
+
+    class Down:
+        def folders(self, account):
+            raise SourceError("School: the server isn't there")
+    store = SqliteStore(":memory:")
+    store.add_account(Account(0, "School", "s@school.example", "imap.school.example"))
+    with pytest.raises(SourceError, match="isn't there"):
+        MailService(store, Down()).sync()
+
+
+def test_a_sync_reports_progress_and_stops_when_asked(service):
+    seen = []
+
+    def progress(account, folder, new):
+        seen.append((account, folder))
+        return len(seen) < 2  # stop at the second folder
+    report = service.sync(progress=progress)
+    assert len(seen) == 2 and report.folders <= 1
+
+
+def test_the_store_can_be_read_while_another_thread_writes_into_it():
+    import threading
+    from missive.domain import Account, Address, Message
+    from missive.infrastructure.sqlite_store import SqliteStore
+    store = SqliteStore(":memory:")
+    account = store.add_account(Account(0, "A", "a@x.org", "imap.x.org"))
+    errors = []
+
+    def write():
+        try:
+            for uid in range(1, 301):
+                store.save_messages([Message(account.id, "INBOX", uid, f"s{uid}", Address("b@x.org"), NOW)])
+        except Exception as e:  # noqa: BLE001
+            errors.append(e)
+    writer = threading.Thread(target=write)
+    writer.start()
+    while writer.is_alive():
+        store.messages(account.id, "INBOX", 50)
+        store.unread_counts()
+    writer.join()
+    assert not errors and store.max_uid(account.id, "INBOX") == 300

@@ -25,32 +25,59 @@ def window(app, service):
 
 
 def titles(window):
-    return [window.threads.item(i).data(THREAD).subject for i in range(window.threads.count())]
+    return [i.data(THREAD).subject for i in items(window)]
 
 
-def test_the_folder_tree_and_the_unified_inbox(window):
-    tree = window.folders
-    assert tree.topLevelItemCount() == 3  # all inboxes, School, Home
-    assert tree.topLevelItem(0).text(0).startswith("All inboxes") and "7" in tree.topLevelItem(0).text(0)
+def items(window):
+    """The conversations in the list (the day headings between them aren't conversations)."""
+    return [window.threads.item(i) for i in range(window.threads.count()) if window.threads.item(i).data(THREAD)]
+
+
+def row_of(window, subject):
+    return next(i for i in range(window.threads.count())
+                if window.threads.item(i).data(THREAD) and window.threads.item(i).data(THREAD).subject == subject)
+
+
+def headings(window):
+    from missive.presentation.main_window import HEADER
+    return [window.threads.item(i).data(HEADER) for i in range(window.threads.count())
+            if window.threads.item(i).data(HEADER)]
+
+
+def test_the_sidebar_lists_the_unified_inbox_then_each_account_with_its_folders(window):
+    assert list(window.nav)[0] == ("all", None)
+    assert window.nav[("all", None)].text() == "All inboxes" and window.nav[("all", None)].unread == 7
+    assert window.nav[("all", None)].isChecked()
+    accounts = {a.id for a in window.service.accounts()}
+    assert {scope[0] for scope in window.nav if scope[0] != "all"} == accounts
+    assert any(row.text() == "Inbox" and row.unread for scope, row in window.nav.items() if scope[0] != "all")
     assert "ER diagram homework" in titles(window) and "Dinner on Saturday?" in titles(window)
 
 
-def test_picking_a_conversation_shows_the_newest_message_clean_and_marks_it_read(window):
-    row = titles(window).index("ER diagram homework")
-    window.threads.setCurrentRow(row)
+def test_conversations_sit_under_day_headings(window):
+    assert headings(window) and headings(window)[0] in ("Today", "Yesterday", "Last 7 days", "Earlier")
+    assert window.threads.item(0).data(THREAD) is None  # the first row is a heading, which can't be picked
+    assert not window.threads.item(0).flags() & Qt.ItemIsSelectable
+
+
+def test_picking_a_conversation_shows_the_newest_message_clean_and_marks_it_read(window, app):
+    window.threads.setCurrentRow(row_of(window, "ER diagram homework"))
+    assert window.subject.text() == "ER diagram homework"  # the conversation's subject is there at once
+    _settle(app, lambda: window._record is not None)
     assert window.subject.text() == "Re: ER diagram homework"
     assert "Both are fine" in window.reader.toPlainText()
-    assert window.service.threads(None, "INBOX")[row].unread == 1  # the newest was unread: now read
+    assert window.sender_name.text() and window.sender_email.text() and window.reader_pages.currentIndex() == 1
+    assert next(t for t in window.service.threads(None, "INBOX") if t.subject == "ER diagram homework").unread == 1
 
 
-def test_remote_pictures_stay_out_until_asked_for(window):
-    from missive.application.services import MailService  # noqa: F401
+def test_remote_pictures_stay_out_until_asked_for(window, app):
     thread = next(t for t in window.service.threads(None, "INBOX") if t.subject == "ER diagram homework")
     window._open(*thread.keys[0])
-    assert "not loaded" in window.notice.text() and not window.load_button.isHidden()
+    _settle(app, lambda: window._record is not None)
+    assert "not loaded" in window.notice.text() and not window.banner.isHidden()
     assert "tracker.example" not in window.reader.toHtml()
     window.load_button.click()
-    assert window.notice.text() == "" and window.load_button.isHidden()
+    assert window.notice.text() == "" and window.banner.isHidden()
 
 
 def test_search_replaces_the_list_and_clearing_it_brings_it_back(window):
@@ -61,21 +88,44 @@ def test_search_replaces_the_list_and_clearing_it_brings_it_back(window):
     assert titles(window) == all_titles
 
 
-def test_flagging_and_syncing_do_not_crash(window):
-    window.threads.setCurrentRow(titles(window).index("Dinner on Saturday?"))
+def test_an_empty_search_says_there_is_nothing_and_an_unpicked_reader_shows_the_empty_state(window):
+    window.search.setText("zzzz-nothing-matches")
+    assert titles(window) == [] and not window.empty_list.isHidden() and window.threads.isHidden()
+    assert window.reader_pages.currentIndex() == 0
+
+
+def test_flagging_marks_the_conversation_and_checking_mail_runs_in_the_background(window, app):
+    window.threads.setCurrentRow(row_of(window, "Dinner on Saturday?"))
+    _settle(app, lambda: window._record is not None)
+    key = (window._record.account_id, window._record.folder, window._record.uid)
+    before = window.service.is_flagged(key)  # the demo's dinner invitation starts flagged
     window.star_button.click()
+    assert window.service.is_flagged(key) is (not before) and window.star_button.isChecked() is (not before)
     window.sync_button.click()
-    assert window.sync_button.isEnabled() and not window.grab().isNull()
+    _settle(app, lambda: window.sync_button.isEnabled() and window._thread is None)
+    assert window.sync_button.isEnabled() and window.busy.isHidden() and not window.grab().isNull()
+    assert window.status.text()  # "Checked at …" or the number of new messages
 
 
 def test_every_folder_can_be_opened(window):
-    def walk(item):
-        window.folders.setCurrentItem(item)
-        for i in range(item.childCount()):
-            walk(item.child(i))
-    for i in range(window.folders.topLevelItemCount()):
-        walk(window.folders.topLevelItem(i))
-    assert window.folders.currentItem() is not None
+    for scope in list(window.nav):
+        window._select_scope(scope)
+        assert window.nav[scope].isChecked() and sum(r.isChecked() for r in window.nav.values()) == 1
+        assert window.title.text()
+
+
+def test_the_window_has_a_menu_for_appearance_and_removing_accounts(window):
+    from PySide6.QtCore import QTimer
+    from PySide6.QtWidgets import QApplication, QMenu
+    seen = []
+
+    def look():
+        menu = next(w for w in QApplication.topLevelWidgets() if isinstance(w, QMenu) and w.isVisible())
+        seen.extend(a.text() for a in menu.actions())
+        menu.close()
+    QTimer.singleShot(200, look)
+    window._show_menu()
+    assert "Appearance" in seen and any(t.startswith("Remove ") for t in seen)
 
 
 def _settle(app, until, seconds=10):
@@ -225,3 +275,74 @@ def test_a_refused_sign_in_shows_why_and_adds_nothing(app):
     dialog.add_button.click()
     _settle(app, lambda: not dialog.error.isHidden())
     assert "cancelled" in dialog.error.text() and service.accounts() == [] and dialog.add_button.isEnabled()
+
+
+def _service_with(source, accounts=("Home",)):
+    from missive.application.services import MailService
+    from missive.domain import Account
+    from missive.infrastructure.passwords import MemoryPasswords
+    from missive.infrastructure.sqlite_store import SqliteStore
+    store = SqliteStore(":memory:")
+    for name in accounts:
+        store.add_account(Account(0, name, f"{name.lower()}@example.org", "imap.example.org"))
+    return MailService(store, source, MemoryPasswords())
+
+
+class SlowSource:
+    """A mailbox on a slow connection: what it is asked for waits until the test lets it through."""
+
+    def __init__(self):
+        import threading
+        from missive.infrastructure.demo_source import DemoSource
+        self.inner = DemoSource()
+        self.gate = threading.Event()
+        self.bodies = []
+
+    def check(self, account, secret):
+        pass
+
+    def folders(self, account):
+        self.gate.wait(10)
+        return self.inner.folders(account)
+
+    def headers(self, account, folder, after_uid):
+        return self.inner.headers(account, folder, after_uid)
+
+    def body(self, account, folder, uid):
+        self.bodies.append(uid)
+        self.gate.wait(10)
+        return self.inner.body(account, folder, uid)
+
+
+def test_checking_mail_on_a_slow_server_leaves_the_window_usable(app):
+    source = SlowSource()
+    service = _service_with(source, ("School", "Home"))
+    window = MainWindow(service)
+    window.show()
+    window.sync()  # must return at once, not after the server answers
+    assert window._thread is not None and not window.busy.isHidden() and not window.sync_button.isEnabled()
+    app.processEvents()
+    assert window.status.text()
+    source.gate.set()
+    _settle(app, lambda: window._thread is None)
+    assert window.busy.isHidden() and window.sync_button.isEnabled() and titles(window)
+    window.close()
+
+
+def test_opening_a_letter_that_must_be_fetched_waits_in_the_background_and_ignores_stale_answers(app):
+    source = SlowSource()
+    source.gate.set()
+    service = _service_with(source, ("School", "Home"))
+    service.sync()
+    window = MainWindow(service)
+    window.show()
+    source.gate.clear()  # from now on the server is slow
+    window.threads.setCurrentRow(row_of(window, "ER diagram homework"))
+    assert window.subject.text() == "ER diagram homework" and window._record is None
+    assert window.reader.placeholderText() == "Loading…"  # the window answered, the letter is on its way
+    window.threads.setCurrentRow(row_of(window, "Dinner on Saturday?"))  # the user moves on
+    source.gate.set()
+    _settle(app, lambda: window._record is not None)
+    _settle(app, lambda: len(window._open_tasks) == 0)
+    assert window.subject.text() == "Dinner on Saturday?" and "pizza" in window.reader.toPlainText()
+    window.close()

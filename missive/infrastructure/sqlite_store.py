@@ -1,8 +1,10 @@
 """SQLite store for accounts, folders and messages, with full-text search (FTS5)."""
 from __future__ import annotations
 
+import functools
 import json
 import sqlite3
+import threading
 from datetime import datetime
 from pathlib import Path
 
@@ -45,9 +47,27 @@ def _load_addresses(text: str) -> tuple[Address, ...]:
     return tuple(Address(e, n) for e, n in json.loads(text or "[]"))
 
 
+def _locked(method):
+    @functools.wraps(method)
+    def wrapper(self, *args, **kwargs):
+        with self._lock:
+            return method(self, *args, **kwargs)
+    return wrapper
+
+
+def _synchronised(cls):
+    """The screen reads the store while a worker thread syncs into it: one lock around every public method."""
+    for name, member in list(vars(cls).items()):
+        if callable(member) and not name.startswith("_"):
+            setattr(cls, name, _locked(member))
+    return cls
+
+
+@_synchronised
 class SqliteStore:
     def __init__(self, path: str | Path = ":memory:"):
-        self.conn = sqlite3.connect(str(path))
+        self._lock = threading.RLock()
+        self.conn = sqlite3.connect(str(path), check_same_thread=False)
         self.conn.row_factory = sqlite3.Row
         self.conn.execute("PRAGMA foreign_keys = ON")
         self.conn.executescript(SCHEMA)

@@ -6,6 +6,8 @@ import email
 import email.policy
 import imaplib
 import re
+import threading
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from email.utils import getaddresses, parsedate_to_datetime
 
@@ -14,6 +16,8 @@ from ..domain import Account, Address, Folder, Message, text_of
 from .oauth import xoauth2
 
 HEADER_FIELDS = "DATE FROM TO CC SUBJECT MESSAGE-ID IN-REPLY-TO REFERENCES"
+BODY_LIMIT = 600_000  # bytes of a message to download: the text comes first, a big attachment isn't needed to read
+FIRST_SYNC = 300  # a folder's first sync takes only its newest messages (a Gmail "All Mail" has tens of thousands)
 ROLES = {"\\inbox": "inbox", "\\sent": "sent", "\\drafts": "drafts", "\\trash": "trash",
          "\\junk": "junk", "\\archive": "archive", "\\all": "archive"}
 _LIST = re.compile(rb'\((?P<flags>[^)]*)\)\s+(?P<delim>"[^"]*"|NIL)\s+(?P<name>.+)')
@@ -73,6 +77,15 @@ def _reason(e: Exception) -> str:
     return str(e) or type(e).__name__
 
 
+class _Slot:
+    """One kept-open connection to one account for one purpose, used by one thread at a time."""
+
+    def __init__(self):
+        self.lock = threading.Lock()
+        self.conn = None
+        self.folder = None  # the folder selected on it, so asking again for the same one costs nothing
+
+
 class ImapSource:
     """MailSource over IMAP-over-TLS. `passwords` maps an account id to its secret (the OS keyring in
     the app): the password, or for a Google or Microsoft account the OAuth refresh token, which `oauth`
@@ -82,6 +95,8 @@ class ImapSource:
         self._passwords = passwords
         self._connect = connect or self._real_connect
         self._oauth = oauth
+        self._slots: dict[tuple[int, str], _Slot] = {}
+        self._slots_lock = threading.Lock()
 
     @staticmethod
     def _real_connect(account: Account):
@@ -106,6 +121,45 @@ class ImapSource:
                 self._close(conn)
             raise SourceError(f"{account.name}: {_reason(e)}") from e
 
+    @contextmanager
+    def _kept(self, account: Account, purpose: str):
+        """A signed-in connection that stays open between calls (a login takes seconds; opening a message
+        shouldn't). "sync" and "read" are separate, so reading a message never waits for a long sync. A
+        connection the server dropped is replaced; one that failed mid-call is thrown away."""
+        with self._slots_lock:
+            slot = self._slots.setdefault((account.id, purpose), _Slot())
+        with slot.lock:
+            if slot.conn is not None:
+                try:
+                    slot.conn.noop()  # also lets the server tell us about new mail
+                except Exception:  # noqa: BLE001 (any way a dead connection can fail)
+                    self._close(slot.conn)
+                    slot.conn, slot.folder = None, None
+            if slot.conn is None:
+                slot.conn, slot.folder = self._session(account), None
+            try:
+                yield slot
+            except Exception:
+                self._close(slot.conn)
+                slot.conn, slot.folder = None, None
+                raise
+
+    def close(self) -> None:
+        """Sign out of every kept connection (the app is closing)."""
+        with self._slots_lock:
+            slots, self._slots = list(self._slots.values()), {}
+        for slot in slots:
+            if slot.conn is not None:
+                self._close(slot.conn)
+
+    @staticmethod
+    def _examine(slot: _Slot, folder: str) -> bool:
+        """Open a folder read-only on this connection (EXAMINE), unless it is open already."""
+        if slot.folder != folder:
+            status, _ = slot.conn.select(f'"{folder}"', readonly=True)
+            slot.folder = folder if status == "OK" else None
+        return slot.folder == folder
+
     def check(self, account: Account, secret: str) -> None:
         conn = self._session(account, secret)
         try:
@@ -116,9 +170,8 @@ class ImapSource:
             self._close(conn)
 
     def folders(self, account: Account) -> list[Folder]:
-        conn = self._session(account)
-        try:
-            status, data = conn.list()
+        with self._kept(account, "sync") as slot:
+            status, data = slot.conn.list()
             out = []
             for line in data or ():
                 m = _LIST.match(line if isinstance(line, bytes) else line[0])
@@ -127,17 +180,15 @@ class ImapSource:
                 name = m["name"].strip().strip(b'"').decode("ascii", "replace")
                 out.append(Folder(account.id, name, role_of(m["flags"].decode("ascii", "ignore"), name)))
             return out
-        finally:
-            self._close(conn)
 
     def headers(self, account: Account, folder: str, after_uid: int) -> list[Message]:
-        conn = self._session(account)
-        try:
-            status, _ = conn.select(f'"{folder}"', readonly=True)  # EXAMINE: nothing can change
-            if status != "OK":
+        with self._kept(account, "sync") as slot:
+            if not self._examine(slot, folder):  # EXAMINE: nothing can change
                 return []
-            status, data = conn.uid("FETCH", f"{after_uid + 1}:*",
-                                    f"(FLAGS BODY.PEEK[HEADER.FIELDS ({HEADER_FIELDS})])")
+            if after_uid == 0:
+                after_uid = self._first_after(slot.conn)
+            status, data = slot.conn.uid("FETCH", f"{after_uid + 1}:*",
+                                         f"(FLAGS BODY.PEEK[HEADER.FIELDS ({HEADER_FIELDS})])")
             out = []
             for item in data or ():
                 if not isinstance(item, tuple):
@@ -149,21 +200,25 @@ class ImapSource:
                 flags = re.search(r"FLAGS \(([^)]*)\)", meta)
                 out.append(parse_headers(account.id, folder, uid, flags.group(1) if flags else "", item[1]))
             return out
-        finally:
-            self._close(conn)
+
+    @staticmethod
+    def _first_after(conn) -> int:
+        """The UID to fetch after on a first sync, so that about FIRST_SYNC messages come back."""
+        status, data = conn.uid("SEARCH", None, "ALL")
+        uids = [int(u) for u in (data[0] if data and data[0] else b"").split()] if status == "OK" else []
+        return uids[-FIRST_SYNC - 1] if len(uids) > FIRST_SYNC else 0
 
     def body(self, account: Account, folder: str, uid: int) -> tuple[str | None, str | None]:
-        conn = self._session(account)
-        try:
-            conn.select(f'"{folder}"', readonly=True)
-            status, data = conn.uid("FETCH", str(uid), "(BODY.PEEK[])")
+        with self._kept(account, "read") as slot:
+            if not self._examine(slot, folder):
+                return None, None
+            # Only the first BODY_LIMIT bytes: the text and HTML come first, a big attachment would just be slow.
+            status, data = slot.conn.uid("FETCH", str(uid), f"(BODY.PEEK[]<0.{BODY_LIMIT}>)")
             for item in data or ():
                 if isinstance(item, tuple):
                     text, html, _attachments = parse_body(item[1])
                     return text, html
             return None, None
-        finally:
-            self._close(conn)
 
     @staticmethod
     def _close(conn):

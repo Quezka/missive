@@ -98,3 +98,112 @@ def test_html_only_mail_still_gets_plain_text():
     text, html, _ = parse_body(raw)
     assert "Only html" in text and "<i>html</i>" in html
     assert parse_headers(1, "INBOX", 1, "", b"Subject: x\r\n\r\n").sender.email == "unknown"
+
+
+# ---- kept connections, partial bodies and the first sync ----
+
+class Counting(FakeImap):
+    """A fake that notices how often it is asked to sign in, and can pretend the server hung up."""
+
+    def __init__(self):
+        super().__init__()
+        self.logins = 0
+        self.alive = True
+
+    def login(self, user, password):
+        self.logins += 1
+
+    def noop(self):
+        if not self.alive:
+            raise OSError("connection reset")
+        self.calls.append(("noop",))
+        return "OK", []
+
+
+def test_reading_several_letters_signs_in_once_and_asks_only_for_the_start_of_each():
+    connections = []
+
+    def connect(account):
+        connections.append(Counting())
+        return connections[-1]
+    src = ImapSource(lambda i: "secret", connect=connect)
+    src.body(ACCOUNT, "INBOX", 7)
+    src.body(ACCOUNT, "INBOX", 8)
+    assert len(connections) == 1 and connections[0].logins == 1  # the second letter reused the connection
+    selects = [c for c in connections[0].calls if c[0] == "select"]
+    assert selects == [("select", '"INBOX"', True)]  # and didn't open the folder again
+    fetches = [c for c in connections[0].calls if c[0] == "uid"]
+    assert all("BODY.PEEK[]<0." in c[3] for c in fetches)  # never the whole message with its attachments
+
+
+def test_reading_and_syncing_use_separate_connections_so_a_long_sync_never_delays_a_letter():
+    connections = []
+
+    def connect(account):
+        connections.append(Counting())
+        return connections[-1]
+    src = ImapSource(lambda i: "secret", connect=connect)
+    src.folders(ACCOUNT)
+    src.body(ACCOUNT, "INBOX", 7)
+    assert len(connections) == 2
+
+
+def test_a_connection_the_server_dropped_is_replaced_quietly():
+    connections = []
+
+    def connect(account):
+        connections.append(Counting())
+        return connections[-1]
+    src = ImapSource(lambda i: "secret", connect=connect)
+    src.body(ACCOUNT, "INBOX", 7)
+    connections[0].alive = False  # the server hung up while the app sat idle
+    text, _html = src.body(ACCOUNT, "INBOX", 7)
+    assert len(connections) == 2 and text.strip() == "Hello plain"
+
+
+def test_a_failed_call_throws_the_connection_away():
+    connections = []
+
+    class Breaks(Counting):
+        def uid(self, command, *args):
+            raise OSError("broken pipe")
+
+    def connect(account):
+        connections.append(Breaks() if not connections else Counting())
+        return connections[-1]
+    src = ImapSource(lambda i: "secret", connect=connect)
+    with pytest.raises(OSError):
+        src.body(ACCOUNT, "INBOX", 7)
+    assert src.body(ACCOUNT, "INBOX", 7)[0].strip() == "Hello plain" and len(connections) == 2
+
+
+class Big(Counting):
+    """A folder of 500 messages, UIDs 1 to 500."""
+
+    def uid(self, command, *args):
+        if command == "SEARCH":
+            return "OK", [b" ".join(str(n).encode() for n in range(1, 501))]
+        return super().uid(command, *args)
+
+
+def test_a_first_sync_asks_only_for_the_newest_messages_of_a_big_folder():
+    fake = Big()
+    ImapSource(lambda i: "x", connect=lambda a: fake).headers(ACCOUNT, "INBOX", 0)
+    fetch = next(c for c in fake.calls if c[0] == "uid" and c[1] == "FETCH")
+    assert fetch[2] == "201:*"  # 300 of 500, not all of them
+
+
+def test_a_small_folder_is_fetched_whole_on_the_first_sync():
+    fake = Counting()
+    fake.uid = lambda command, *args: ("OK", [b"1 2 3"]) if command == "SEARCH" else FakeImap.uid(fake, command, *args)
+    ImapSource(lambda i: "x", connect=lambda a: fake).headers(ACCOUNT, "INBOX", 0)
+    fetch = next(c for c in fake.calls if c[0] == "uid" and c[1] == "FETCH")
+    assert fetch[2] == "1:*"
+
+
+def test_close_signs_out_of_every_kept_connection():
+    fake = Counting()
+    src = ImapSource(lambda i: "x", connect=lambda a: fake)
+    src.body(ACCOUNT, "INBOX", 7)
+    src.close()
+    assert ("logout",) in fake.calls

@@ -18,6 +18,6 @@ def run(services, argv: list[str]) -> int:
     from .main_window import MainWindow
 
     app = create_application(argv)
-    window = MainWindow(services)
+    window = MainWindow(services, auto_sync=True)  # looks for new mail when it opens, then every few minutes
     window.show()
     return app.exec()

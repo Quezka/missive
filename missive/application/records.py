@@ -35,6 +35,8 @@ class ThreadRecord:
     flagged: bool
     has_attachments: bool
     keys: tuple[tuple[int, str, int], ...]  # (account, folder, uid) of each message, oldest first
+    sender: str = ""  # who wrote the latest message, as it would be shown ("Prof. Rossi")
+    sender_email: str = ""
 
 
 @dataclass(frozen=True)
@@ -60,6 +62,7 @@ class MessageRecord:
 class SyncReport:
     new: int
     folders: int
+    problems: tuple[str, ...] = ()  # folders or accounts that couldn't be read, in the user's words
 
 
 @dataclass(frozen=True)
