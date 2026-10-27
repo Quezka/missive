@@ -99,7 +99,7 @@ def test_prefetch_can_be_stopped_and_gives_up_on_an_account_whose_server_fails(s
     from missive.application.services import MailService
 
     class Failing:
-        def body(self, *a):
+        def body(self, *a, **k):
             raise OSError("down")
     broken = MailService(service._store, Failing(), None)
     assert broken.prefetch() == 0  # no crash: the letters will be fetched when opened

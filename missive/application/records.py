@@ -20,6 +20,7 @@ class FolderRecord:
     role: str
     unread: int
     total: int
+    title: str = ""  # the name to show: decoded and without its path ("Спам", not "[Gmail]/&BCEEPwQwBDw-")
 
 
 @dataclass(frozen=True)

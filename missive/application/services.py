@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from ..domain import (AUTH_METHODS, OAUTH_HOSTS, Account, Message, clean_html, group, guess_server, link_targets,
-                      text_of, valid_address)
+from ..domain import (AUTH_METHODS, OAUTH_HOSTS, Account, Message, clean_html, display_name, group, guess_server,
+                      link_targets, text_of, valid_address)
 from .errors import ApplicationError, NotFound, SourceError
 from .ports import MailSource, MessageStore, OAuthClient, PasswordStore
 from .records import AccountDraft, AccountRecord, FolderRecord, MessageRecord, ServerGuess, SyncReport, ThreadRecord
@@ -110,7 +110,7 @@ class MailService:
         unread, totals = self._store.unread_counts(), self._store.totals()
         order = {"inbox": 0, "drafts": 1, "sent": 2, "archive": 3, "junk": 4, "trash": 5, "": 6}
         folders = sorted(self._store.folders(), key=lambda f: (f.account_id, order.get(f.role, 6), f.name.casefold()))
-        return [FolderRecord(f.account_id, f.name, f.role, unread.get(f.key, 0), totals.get(f.key, 0))
+        return [FolderRecord(f.account_id, f.name, f.role, unread.get(f.key, 0), totals.get(f.key, 0), display_name(f.name))
                 for f in folders]
 
     # ---- fetching ----
@@ -136,7 +136,7 @@ class MailService:
                 continue
             self._store.save_folders(found)
             for folder in found:
-                if progress is not None and progress(account.name, folder.name, new) is False:
+                if progress is not None and progress(account.name, display_name(folder.name), new) is False:
                     return SyncReport(new, folders, tuple(problems))
                 try:
                     after = self._store.max_uid(account.id, folder.name)
@@ -170,7 +170,7 @@ class MailService:
         m = self._store.message(*key)
         return bool(m and m.flagged)
 
-    def prefetch(self, limit: int = 30, stop=None) -> int:
+    def prefetch(self, limit: int = 15, stop=None) -> int:
         """Download the text of the newest messages of each inbox that haven't got it, so that opening them
         is instant. A server that fails ends that account's turn; `stop()` returning True ends it all."""
         done = 0
@@ -183,7 +183,7 @@ class MailService:
                     if m.fetched:
                         continue
                     try:
-                        text, html = self._source.body(account, name, m.uid)
+                        text, html = self._source.body(account, name, m.uid, background=True)
                     except Exception:  # noqa: BLE001 (it will be fetched when the user opens it)
                         break
                     self._store.save_body(account.id, name, m.uid, text, html)

@@ -207,3 +207,58 @@ def test_close_signs_out_of_every_kept_connection():
     src.body(ACCOUNT, "INBOX", 7)
     src.close()
     assert ("logout",) in fake.calls
+
+
+# ---- fetching ahead, quiet folders, folder names ----
+
+def test_fetching_ahead_has_its_own_connection_so_a_clicked_letter_never_waits_behind_it():
+    connections = []
+
+    def connect(account):
+        connections.append(Counting())
+        return connections[-1]
+    src = ImapSource(lambda i: "secret", connect=connect)
+    src.body(ACCOUNT, "INBOX", 7, background=True)
+    src.body(ACCOUNT, "INBOX", 8)
+    assert len(connections) == 2
+
+
+class Quiet(Counting):
+    """A folder whose next UID is 8 (so its newest message is UID 7)."""
+
+    def status(self, folder, what):
+        self.calls.append(("status", folder, what))
+        return "OK", [b'"INBOX" (UIDNEXT 8)']
+
+
+def test_a_folder_with_nothing_new_is_skipped_after_one_cheap_status_call():
+    fake = Quiet()
+    got = ImapSource(lambda i: "x", connect=lambda a: fake).headers(ACCOUNT, "INBOX", after_uid=7)
+    assert got == []
+    assert not any(c[0] in ("select", "uid") for c in fake.calls)  # never even opened
+
+
+def test_a_folder_with_something_new_is_still_read():
+    fake = Quiet()
+    got = ImapSource(lambda i: "x", connect=lambda a: fake).headers(ACCOUNT, "INBOX", after_uid=5)
+    assert [m.uid for m in got] == [7]
+
+
+def test_a_server_without_status_is_simply_read_as_before():
+    got = source(FakeImap()).headers(ACCOUNT, "INBOX", after_uid=5)  # FakeImap has no status()
+    assert [m.uid for m in got] == [7]
+
+
+def test_folder_names_are_decoded_for_people():
+    from missive.domain import decode_mailbox_name, display_name
+    assert display_name("[Gmail]/&BCEEPwQwBDw-") == "Спам"
+    assert display_name("[Gmail]/&BBIEQQRP- &BD8EPgRHBEIEMA-") == "Вся почта"
+    assert display_name("INBOX") == "INBOX" and display_name("Posta/Inviata") == "Inviata"
+    assert decode_mailbox_name("R&AOk-sum&AOk-") == "Résumé" and decode_mailbox_name("A&-B") == "A&B"
+    assert decode_mailbox_name("&broken") == "&broken"  # not valid: shown as the server wrote it
+
+
+def test_the_service_gives_the_screen_decoded_folder_titles(service):
+    from missive.domain import Folder
+    service._store.save_folders([Folder(1, "[Gmail]/&BCEEPwQwBDw-", "junk")])
+    assert "Спам" in [f.title for f in service.folders()]

@@ -1,5 +1,9 @@
 # Changelog
 
+## [0.4.2] - 2026-10-27
+
+Faster and clearer. A folder with nothing new is now skipped after one tiny question to the server instead of being opened, so checking a big Gmail takes seconds. Fetching letters ahead of time uses its own connection and the check no longer shows as busy while it does, so a letter you click never waits behind it. Only the first 250 KB of a message is downloaded. Folder names written in other alphabets (a Russian Gmail's "Спам", "Корзина", "Вся почта") are now shown properly instead of as codes. `missive --debug` (or MISSIVE_DEBUG=1) prints how long each server step takes, to find slow spots.
+
 ## [0.4.1] - 2026-10-27
 
 (The 0.4.0 tag never produced a release: its version number had not been bumped. This is the same work, released as 0.4.1.)

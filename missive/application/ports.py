@@ -16,8 +16,10 @@ class MailSource(Protocol):
         """Messages in `folder` with a UID above `after_uid`, without their bodies."""
         ...
 
-    def body(self, account: Account, folder: str, uid: int) -> tuple[str | None, str | None]:
-        """(plain text, HTML) of one message."""
+    def body(self, account: Account, folder: str, uid: int,
+             background: bool = False) -> tuple[str | None, str | None]:
+        """(plain text, HTML) of one message. `background` marks fetching ahead of time, which must never
+        make a letter the user clicked wait behind it."""
         ...
 
     def check(self, account: Account, secret: str) -> None:

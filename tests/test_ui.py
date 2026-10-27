@@ -308,7 +308,7 @@ class SlowSource:
     def headers(self, account, folder, after_uid):
         return self.inner.headers(account, folder, after_uid)
 
-    def body(self, account, folder, uid):
+    def body(self, account, folder, uid, background=False):
         self.bodies.append(uid)
         self.gate.wait(10)
         return self.inner.body(account, folder, uid)

@@ -214,7 +214,8 @@ class _SyncJob(QObject):
     """Checks for new mail off the UI thread: the network can take minutes on a big mailbox."""
 
     progress = Signal(str)
-    done = Signal(object, str)  # (SyncReport or None, what went wrong or "")
+    done = Signal(object, str)  # the check itself is over: (SyncReport or None, what went wrong or "")
+    finished = Signal()  # and the newest letters have been downloaded too: the thread can end
 
     def __init__(self, service: MailService):
         super().__init__()
@@ -230,14 +231,18 @@ class _SyncJob(QObject):
 
     def run(self):
         try:
-            report = self._service.sync(progress=self._report)
-            self.progress.emit(_("Downloading recent mail…"))
-            self._service.prefetch(stop=self._stop.is_set)  # so the newest letters open instantly
-            self.done.emit(report, "")
+            self.done.emit(self._service.sync(progress=self._report), "")
         except ApplicationError as e:
             self.done.emit(None, str(e))
+            return self.finished.emit()
         except Exception as e:  # noqa: BLE001
             self.done.emit(None, f"{type(e).__name__}: {e}")
+            return self.finished.emit()
+        try:  # quietly, after the screen is already up to date: the newest letters then open instantly
+            self._service.prefetch(stop=self._stop.is_set)
+        except Exception:  # noqa: BLE001 (they will be fetched when opened)
+            pass
+        self.finished.emit()
 
 
 class _OpenTask(QRunnable):
@@ -522,7 +527,7 @@ class MainWindow(QMainWindow):
             self.nav_box.addSpacing(10)
             self.nav_box.addWidget(section)
             for f in (f for f in folders if f.account_id == account.id):
-                self._add_nav(self._folder_name(f.name, f.role), FOLDER_ICONS.get(f.role, "folder"),
+                self._add_nav(self._folder_name(f.title or f.name, f.role), FOLDER_ICONS.get(f.role, "folder"),
                               (account.id, f.name), f.unread)
         if self._scope not in self.nav:
             self._scope = ALL_INBOXES
@@ -540,7 +545,7 @@ class MainWindow(QMainWindow):
     @staticmethod
     def _folder_name(name: str, role: str) -> str:
         return {"inbox": _("Inbox"), "sent": _("Sent"), "archive": _("Archive"), "drafts": _("Drafts"),
-                "trash": _("Trash"), "junk": _("Junk")}.get(role, name.rsplit("/", 1)[-1])
+                "trash": _("Trash"), "junk": _("Junk")}.get(role, name)
 
     def _current_scope(self):
         return self._scope
@@ -766,9 +771,11 @@ class MainWindow(QMainWindow):
         self._job.moveToThread(self._thread)
         self._thread.started.connect(self._job.run)
         self._job.progress.connect(self.status.setText)
-        self._job.done.connect(self._synced)  # a method of this window: delivered on the UI thread
+        self._job.done.connect(self._synced)  # methods of this window: delivered on the UI thread
+        self._job.finished.connect(self._stop_sync)
         self._thread.start()
 
+    @Slot()
     def _stop_sync(self):
         if self._thread is not None:
             self._job.stop()
@@ -778,7 +785,6 @@ class MainWindow(QMainWindow):
 
     @Slot(object, str)
     def _synced(self, report, problem: str):
-        self._stop_sync()
         self.busy.hide()
         self.sync_button.setEnabled(True)
         self.refresh_folders()

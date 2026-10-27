@@ -74,6 +74,6 @@ class DemoSource:
         return [replace(m, body_text=None, body_html=None) for m in self._all(account)
                 if m.folder == folder and m.uid > after_uid]
 
-    def body(self, account: Account, folder: str, uid: int) -> tuple[str | None, str | None]:
+    def body(self, account: Account, folder: str, uid: int, background: bool = False) -> tuple[str | None, str | None]:
         m = next((x for x in self._all(account) if x.folder == folder and x.uid == uid), None)
         return (m.body_text, m.body_html) if m else (None, None)

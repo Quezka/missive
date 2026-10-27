@@ -5,8 +5,10 @@ from __future__ import annotations
 import email
 import email.policy
 import imaplib
+import logging
 import re
 import threading
+import time
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from email.utils import getaddresses, parsedate_to_datetime
@@ -15,8 +17,10 @@ from ..application.errors import SourceError
 from ..domain import Account, Address, Folder, Message, text_of
 from .oauth import xoauth2
 
+log = logging.getLogger("missive.imap")  # MISSIVE_DEBUG=1 shows where the time goes
+
 HEADER_FIELDS = "DATE FROM TO CC SUBJECT MESSAGE-ID IN-REPLY-TO REFERENCES"
-BODY_LIMIT = 600_000  # bytes of a message to download: the text comes first, a big attachment isn't needed to read
+BODY_LIMIT = 250_000  # bytes of a message to download: the text comes first, a big attachment isn't needed to read
 FIRST_SYNC = 300  # a folder's first sync takes only its newest messages (a Gmail "All Mail" has tens of thousands)
 ROLES = {"\\inbox": "inbox", "\\sent": "sent", "\\drafts": "drafts", "\\trash": "trash",
          "\\junk": "junk", "\\archive": "archive", "\\all": "archive"}
@@ -136,7 +140,10 @@ class ImapSource:
                     self._close(slot.conn)
                     slot.conn, slot.folder = None, None
             if slot.conn is None:
+                started = time.monotonic()
                 slot.conn, slot.folder = self._session(account), None
+                log.debug("%s: new %s connection and sign-in took %.2fs", account.name, purpose,
+                          time.monotonic() - started)
             try:
                 yield slot
             except Exception:
@@ -181,8 +188,24 @@ class ImapSource:
                 out.append(Folder(account.id, name, role_of(m["flags"].decode("ascii", "ignore"), name)))
             return out
 
+    @staticmethod
+    def _uid_next(conn, folder: str) -> int | None:
+        """The UID the folder will give its next message, from one cheap STATUS (None if the server won't say)."""
+        try:
+            status, data = conn.status(f'"{folder}"', "(UIDNEXT)")
+            match = re.search(rb"UIDNEXT (\d+)", data[0] if data and isinstance(data[0], bytes) else b"")
+            return int(match.group(1)) if status == "OK" and match else None
+        except Exception:  # noqa: BLE001 (an optimisation only: without it the folder is simply looked at)
+            return None
+
     def headers(self, account: Account, folder: str, after_uid: int) -> list[Message]:
+        started = time.monotonic()
         with self._kept(account, "sync") as slot:
+            if after_uid > 0:
+                upcoming = self._uid_next(slot.conn, folder)
+                if upcoming is not None and upcoming - 1 <= after_uid:  # nothing new: no need to even open it
+                    log.debug("%s / %s: nothing new (%.2fs)", account.name, folder, time.monotonic() - started)
+                    return []
             if not self._examine(slot, folder):  # EXAMINE: nothing can change
                 return []
             if after_uid == 0:
@@ -199,6 +222,7 @@ class ImapSource:
                     continue
                 flags = re.search(r"FLAGS \(([^)]*)\)", meta)
                 out.append(parse_headers(account.id, folder, uid, flags.group(1) if flags else "", item[1]))
+            log.debug("%s / %s: %d new header(s) in %.2fs", account.name, folder, len(out), time.monotonic() - started)
             return out
 
     @staticmethod
@@ -208,8 +232,11 @@ class ImapSource:
         uids = [int(u) for u in (data[0] if data and data[0] else b"").split()] if status == "OK" else []
         return uids[-FIRST_SYNC - 1] if len(uids) > FIRST_SYNC else 0
 
-    def body(self, account: Account, folder: str, uid: int) -> tuple[str | None, str | None]:
-        with self._kept(account, "read") as slot:
+    def body(self, account: Account, folder: str, uid: int,
+             background: bool = False) -> tuple[str | None, str | None]:
+        started = time.monotonic()
+        # Fetching ahead has its own connection, so a letter the user clicks never waits behind it.
+        with self._kept(account, "prefetch" if background else "read") as slot:
             if not self._examine(slot, folder):
                 return None, None
             # Only the first BODY_LIMIT bytes: the text and HTML come first, a big attachment would just be slow.
@@ -217,6 +244,8 @@ class ImapSource:
             for item in data or ():
                 if isinstance(item, tuple):
                     text, html, _attachments = parse_body(item[1])
+                    log.debug("%s / %s: letter %d (%d bytes) in %.2fs%s", account.name, folder, uid, len(item[1]),
+                              time.monotonic() - started, " (ahead)" if background else "")
                     return text, html
             return None, None
 

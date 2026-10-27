@@ -41,6 +41,11 @@
 
   <!-- Newest first. Every released version needs an entry. -->
   <releases>
+    <release version="0.4.2" date="2026-10-27">
+      <description>
+        <p>Faster checks: a folder with nothing new is skipped after one quick question to the server. Fetching letters ahead of time no longer delays the one you click, and only the start of each message is downloaded. Folder names in other alphabets are shown properly. A --debug switch shows how long each server step takes.</p>
+      </description>
+    </release>
     <release version="0.4.1" date="2026-10-27">
       <description>
         <p>Fixed the freeze after signing in: mail is now checked in the background and a first check takes only the newest messages of each folder. Letters open much faster (the connection stays open, only the text is downloaded, the newest are pre-loaded). A new look with folder icons, unread counts, avatars, day headings and a clearer reader.</p>
