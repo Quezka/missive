@@ -14,7 +14,7 @@ from PySide6.QtGui import (
 from PySide6.QtWidgets import (
     QApplication, QFrame, QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem, QMainWindow, QMenu,
     QMessageBox, QProgressBar, QScrollArea, QSizePolicy, QSplitter, QStackedWidget, QStyle, QStyledItemDelegate,
-    QStyleOptionViewItem, QTextBrowser, QToolButton, QVBoxLayout, QWidget,
+    QStyleOptionViewItem, QToolButton, QVBoxLayout, QWidget,
 )
 
 from .. import APP_NAME
@@ -24,6 +24,7 @@ from ..application.services import MailService
 from . import icons, theme
 from .account_dialog import AccountDialog
 from .compose_dialog import ComposeDialog
+from .mail_reader import MailReader
 from .i18n import _
 from .views.common import Card, button, icon_button, label, primary_button
 
@@ -427,7 +428,7 @@ class MainWindow(QMainWindow):
         self.reply_button.clicked.connect(lambda: self.reply(False))
         self.reply_all_button.clicked.connect(lambda: self.reply(True))
         self.forward_button.clicked.connect(self.forward)
-        self.reader = QTextBrowser()
+        self.reader = MailReader()
         self.reader.setOpenLinks(False)
         self.reader.setFrameShape(QFrame.NoFrame)
         self.reader.anchorClicked.connect(self._link_clicked)
@@ -698,7 +699,7 @@ class MainWindow(QMainWindow):
         self.sender_when.setText("")
         self.from_line.setText("")
         self.banner.hide()
-        self.reader.setHtml("")
+        self.reader.clear_mail()
         self.reader.setPlaceholderText(_("Loading…"))
         self.reader_pages.setCurrentIndex(1)
         self._set_reply_enabled(False)
@@ -727,7 +728,7 @@ class MainWindow(QMainWindow):
         self.sender_email.setText(m.sender_email)
         self.sender_when.setText(f"{m.sent.day} {m.sent.strftime('%b %Y')}, {m.sent.hour:02d}:{m.sent.minute:02d}")
         self.from_line.setText(_("To: {to}").format(to=m.to))
-        self.reader.setHtml(m.html)
+        self.reader.show_mail(m.html, m.images if self.load_images else ())  # internet pictures only if asked
         self.star_button.setToolTip(_("Unflag") if m.flagged else _("Flag this message"))
         self.star_button.setChecked(m.flagged)
         blocked = m.blocked_images and not self.load_images
@@ -753,7 +754,7 @@ class MainWindow(QMainWindow):
         self.notice.setText("")
         self.load_button.setVisible(False)
         self.banner.setVisible(False)
-        self.reader.setHtml("")
+        self.reader.clear_mail()
         self.reader_pages.setCurrentIndex(0)
         self._set_reply_enabled(False)
 

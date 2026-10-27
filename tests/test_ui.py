@@ -70,14 +70,17 @@ def test_picking_a_conversation_shows_the_newest_message_clean_and_marks_it_read
     assert next(t for t in window.service.threads(None, "INBOX") if t.subject == "ER diagram homework").unread == 1
 
 
-def test_remote_pictures_stay_out_until_asked_for(window, app):
+def test_remote_pictures_stay_out_until_asked_for(window, app, monkeypatch):
+    asked = []
+    monkeypatch.setattr(type(window.reader), "_fetch", lambda self, url, generation: asked.append(url))  # no real network
     thread = next(t for t in window.service.threads(None, "INBOX") if t.subject == "ER diagram homework")
     window._open(*thread.keys[0])
     _settle(app, lambda: window._record is not None)
     assert "not loaded" in window.notice.text() and not window.banner.isHidden()
-    assert "tracker.example" not in window.reader.toHtml()
+    assert "tracker.example" not in window.reader.toHtml() and asked == []  # nothing was fetched yet
     window.load_button.click()
     assert window.notice.text() == "" and window.banner.isHidden()
+    assert asked == ["https://tracker.example/pixel.gif"]  # asking is what lets the pictures be fetched
 
 
 def test_search_replaces_the_list_and_clearing_it_brings_it_back(window):

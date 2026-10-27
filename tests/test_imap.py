@@ -262,3 +262,74 @@ def test_the_service_gives_the_screen_decoded_folder_titles(service):
     from missive.domain import Folder
     service._store.save_folders([Folder(1, "[Gmail]/&BCEEPwQwBDw-", "junk")])
     assert "Спам" in [f.title for f in service.folders()]
+
+
+# ---- pictures that travel inside the message ----
+
+import base64  # noqa: E402
+
+PIXEL = base64.b64decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==")
+
+
+def related(html: str, parts: dict, padding: int = 0) -> bytes:
+    """A multipart/related message: HTML, then pictures by Content-ID, then (maybe) a big attachment."""
+    out = (b"From: a@x.org\r\nSubject: s\r\nMIME-Version: 1.0\r\nContent-Type: multipart/related; boundary=R\r\n\r\n"
+           b"--R\r\nContent-Type: text/html; charset=utf-8\r\n\r\n" + html.encode() + b"\r\n")
+    for cid, (ctype, data) in parts.items():
+        out += (f"--R\r\nContent-Type: {ctype}\r\nContent-ID: <{cid}>\r\nContent-Transfer-Encoding: base64\r\n\r\n"
+                ).encode() + base64.encodebytes(data) + b"\r\n"
+    if padding:
+        out += (b"--R\r\nContent-Type: application/octet-stream\r\nContent-Transfer-Encoding: base64\r\n\r\n"
+                + base64.encodebytes(b"x" * padding) + b"\r\n")
+    return out + b"--R--\r\n"
+
+
+def test_pictures_sent_inside_a_message_become_part_of_its_html():
+    raw = related('<p>Hi</p><img src="cid:logo@x"><img src=\'cid:Other@x\'><img src="cid:missing@x">',
+                  {"logo@x": ("image/png", PIXEL), "Other@x": ("image/gif", b"GIF89a")})
+    _text, html, _att = parse_body(raw)
+    assert html.count("data:image/png;base64,") == 1 and html.count("data:image/gif;base64,") == 1
+    assert "cid:missing@x" in html and "cid:logo" not in html  # what isn't in the message stays unresolved
+
+
+def test_a_huge_or_unsafe_inline_picture_is_left_out():
+    raw = related('<img src="cid:big@x"><img src="cid:svg@x">',
+                  {"big@x": ("image/png", b"x" * 2_000_000), "svg@x": ("image/svg+xml", b"<svg onload=alert(1)/>")})
+    _text, html, _att = parse_body(raw)
+    assert "data:" not in html and "cid:big@x" in html and "cid:svg@x" in html
+
+
+class Sliced(Counting):
+    """A server that honours partial fetches, holding one message."""
+
+    def __init__(self, raw):
+        super().__init__()
+        self.raw, self.fetches = raw, []
+
+    def uid(self, command, *args):
+        self.fetches.append(args)
+        item = args[1]
+        match = re.search(r"<0\.(\d+)>", item)
+        data = self.raw[: int(match.group(1))] if match else self.raw
+        return "OK", [(b"1 (UID 7 BODY[] {%d}" % len(data), data), b")"]
+
+
+import re  # noqa: E402
+
+
+def test_a_message_whose_pictures_were_cut_off_by_the_partial_fetch_is_fetched_again_in_full():
+    from missive.infrastructure.imap_source import BODY_LIMIT
+    raw = related('<p>Hello</p><img src="cid:late@x">', {}, padding=0)
+    raw = raw.replace(b"--R--\r\n", b"") + b"--R\r\nContent-Type: application/octet-stream\r\nContent-Transfer-Encoding: base64\r\n\r\n" \
+        + base64.encodebytes(b"x" * (BODY_LIMIT * 2)) + b"--R\r\nContent-Type: image/png\r\nContent-ID: <late@x>\r\nContent-Transfer-Encoding: base64\r\n\r\n" \
+        + base64.encodebytes(PIXEL) + b"--R--\r\n"  # the picture comes after a big attachment: past the first 250 KB
+    fake = Sliced(raw)
+    _text, html = ImapSource(lambda i: "x", connect=lambda a: fake).body(ACCOUNT, "INBOX", 7)
+    assert "data:image/png;base64," in html and len(fake.fetches) == 2
+    assert "<0." in fake.fetches[0][1] and "<0." in fake.fetches[1][1]  # both bounded; the second one is bigger
+
+
+def test_a_message_without_inline_pictures_is_fetched_once():
+    fake = Sliced(related("<p>Hello</p>", {}))
+    ImapSource(lambda i: "x", connect=lambda a: fake).body(ACCOUNT, "INBOX", 7)
+    assert len(fake.fetches) == 1

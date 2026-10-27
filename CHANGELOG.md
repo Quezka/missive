@@ -1,5 +1,9 @@
 # Changelog
 
+## [0.5.1] - 2026-10-27
+
+Fixed: pictures in mail did not show. Qt only draws pictures from files, so pictures on the internet never appeared even after Load pictures, and pictures sent inside the message (`cid:`) were never put back. Now pictures inside a message show at once (nothing is fetched, so nothing can track you; if they sit past the first 250 KB the message is fetched again in full), and Load pictures really fetches the internet ones, scaled to the window. Fetching has hard rules: only public addresses (a message can't make your computer contact your router, your NAS or localhost), no cookies, no cache, no referrer, 15 s and 8 MB per picture, at most 40 per message, and an old request is dropped the moment you open another letter.
+
 ## [0.5.0] - 2026-10-27
 
 Writing mail: **New message**, **Reply**, **Reply to all** and **Forward**, in a compose window that stays out of the way while you read. Send waits eight seconds with an **Undo** bar (and still sends if you close the window), then goes out over SMTP with TLS, signed in with your password or with your Google or Microsoft token (Google needs nothing new; a Microsoft account must be removed and added again once to grant the send permission). A message the server refuses comes back for you to fix, with everything you typed. Replies quote the original and keep the thread; Bcc stays out of the headers; a mistyped address is named before anything is sent. Accounts without Gmail's or Outlook's habit of filing sent mail get a copy in their Sent folder. Outgoing server settings per account (guessed for common providers). Includes everything in 0.4.2 below, which was never released on its own.

@@ -41,6 +41,11 @@
 
   <!-- Newest first. Every released version needs an entry. -->
   <releases>
+    <release version="0.5.1" date="2026-10-27">
+      <description>
+        <p>Fixed pictures in mail: pictures inside a message now show at once, and Load pictures really loads the ones on the internet, safely (public addresses only, no cookies, size and time limits).</p>
+      </description>
+    </release>
     <release version="0.5.0" date="2026-10-27">
       <description>
         <p>Writing mail: new message, reply, reply to all and forward, with eight seconds to undo after Send. Works with passwords and with Google and Microsoft sign-in. Also faster checks and letters, and folder names in other alphabets.</p>

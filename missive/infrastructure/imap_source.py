@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import email
 import email.policy
+import base64
 import imaplib
 import logging
 import re
@@ -20,7 +21,10 @@ from .oauth import xoauth2
 log = logging.getLogger("missive.imap")  # MISSIVE_DEBUG=1 shows where the time goes
 
 HEADER_FIELDS = "DATE FROM TO CC SUBJECT MESSAGE-ID IN-REPLY-TO REFERENCES"
-BODY_LIMIT = 250_000  # bytes of a message to download: the text comes first, a big attachment isn't needed to read
+BODY_LIMIT = 250_000
+FULL_LIMIT = 6_000_000  # a message whose inline pictures were cut off is fetched again up to this size
+INLINE_TYPES = {"image/png", "image/jpeg", "image/gif", "image/webp", "image/bmp"}
+INLINE_EACH, INLINE_TOTAL = 1_500_000, 4_000_000  # bytes of a message to download: the text comes first, a big attachment isn't needed to read
 FIRST_SYNC = 300  # a folder's first sync takes only its newest messages (a Gmail "All Mail" has tens of thousands)
 ROLES = {"\\inbox": "inbox", "\\sent": "sent", "\\drafts": "drafts", "\\trash": "trash",
          "\\junk": "junk", "\\archive": "archive", "\\all": "archive"}
@@ -53,14 +57,36 @@ def parse_headers(account_id: int, folder: str, uid: int, flags: str, raw: bytes
         "\\Flagged" in flags)
 
 
+def _inline_images(msg, markup: str) -> str:
+    """Pictures sent inside the message and referred to as src="cid:..." are put into the HTML as data: addresses
+    (nothing is fetched from anywhere, so nothing can track the reader). Big ones are left out."""
+    wanted = {m.lower() for m in re.findall(r"""src\s*=\s*["']?cid:([^"'\s>]+)""", markup, re.I)}
+    if not wanted:
+        return markup
+    found, total = {}, 0
+    for part in msg.walk():
+        cid = (part.get("Content-ID") or "").strip().strip("<>").lower()
+        if cid not in wanted or part.get_content_type() not in INLINE_TYPES:
+            continue
+        data = part.get_payload(decode=True) or b""
+        if not data or len(data) > INLINE_EACH or total + len(data) > INLINE_TOTAL:
+            continue
+        total += len(data)
+        found[cid] = f"data:{part.get_content_type()};base64,{base64.b64encode(data).decode('ascii')}"
+    return re.sub(r"""(src\s*=\s*["']?)cid:([^"'\s>]+)""",
+                  lambda m: m.group(1) + found.get(m.group(2).lower(), "cid:" + m.group(2)), markup, flags=re.I)
+
+
 def parse_body(raw: bytes) -> tuple[str | None, str | None, bool]:
-    """(plain text, HTML, has attachments) of a whole message."""
+    """(plain text, HTML, has attachments) of a whole message; pictures inside it are inlined into the HTML."""
     msg = email.message_from_bytes(raw, policy=email.policy.default)
     text = msg.get_body(preferencelist=("plain",))
     html = msg.get_body(preferencelist=("html",))
     attachments = any(True for _ in msg.iter_attachments())
     plain = text.get_content() if text is not None else None
     markup = html.get_content() if html is not None else None
+    if markup is not None:
+        markup = _inline_images(msg, markup)
     if plain is None and markup is not None:
         plain = text_of(markup)
     return plain, markup, attachments
@@ -244,6 +270,13 @@ class ImapSource:
             for item in data or ():
                 if isinstance(item, tuple):
                     text, html, _attachments = parse_body(item[1])
+                    if html and re.search(r"src\s*=\s*[\"']?cid:", html, re.I) and len(item[1]) >= BODY_LIMIT:
+                        # Its own pictures come after the text and the start of the message cut them off.
+                        status, more = slot.conn.uid("FETCH", str(uid), f"(BODY.PEEK[]<0.{FULL_LIMIT}>)")
+                        for whole in more or ():
+                            if isinstance(whole, tuple):
+                                text, html, _attachments = parse_body(whole[1])
+                                break
                     log.debug("%s / %s: letter %d (%d bytes) in %.2fs%s", account.name, folder, uid, len(item[1]),
                               time.monotonic() - started, " (ahead)" if background else "")
                     return text, html

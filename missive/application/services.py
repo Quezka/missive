@@ -3,8 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from ..domain import (AUTH_METHODS, OAUTH_HOSTS, Account, Address, DomainError, Message, Outgoing, check_outgoing,
-                      clean_html, display_name, forward_subject, forwarded, group, guess_server, link_targets,
-                      parse_recipients, quote, reply_recipients, reply_subject, smtp_for, text_of, valid_address)
+                      clean_html, display_name, forward_subject, forwarded, group, guess_server, image_urls,
+                      link_targets, parse_recipients, quote, reply_recipients, reply_subject, smtp_for, text_of, valid_address)
 from .errors import ApplicationError, NotFound, SourceError
 from .ports import MailSender, MailSource, MessageStore, OAuthClient, PasswordStore
 from .records import (AccountDraft, AccountRecord, DraftRecord, FolderRecord, MessageRecord, ServerGuess, SyncReport,
@@ -330,4 +330,4 @@ def _message_record(m: Message, load_images: bool) -> MessageRecord:
     return MessageRecord(
         m.account_id, m.folder, m.uid, m.subject or "(no subject)", m.sender.display, m.sender.email,
         ", ".join(str(a) for a in m.to), ", ".join(str(a) for a in m.cc), m.sent, m.seen, m.flagged,
-        safe, text, blocked, tuple(link_targets(m.body_html or "")))
+        safe, text, blocked, tuple(link_targets(m.body_html or "")), tuple(image_urls(m.body_html or "")))

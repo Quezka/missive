@@ -57,6 +57,7 @@ class MessageRecord:
     text: str
     blocked_images: int  # remote pictures left out (tracking pixels live there)
     links: tuple[str, ...]  # where its links really go
+    images: tuple[str, ...] = ()  # remote pictures to fetch, but only once the user has asked for them
 
 
 @dataclass(frozen=True)
