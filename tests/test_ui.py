@@ -387,3 +387,28 @@ def test_reading_a_letter_does_not_move_the_list(window, app):
     window.threads.setCurrentRow(window.threads.count() - 1)
     _settle(app, lambda: window._record is not None)
     assert bar.value() >= place - 2  # it stayed (an update of one row, not a rebuild from the top)
+
+
+def test_several_conversations_can_be_picked_marked_and_deleted(window, monkeypatch):
+    from PySide6.QtWidgets import QMessageBox
+    window.select_button.click()
+    rows = [window.threads.item(i) for i in range(window.threads.count()) if window.threads.item(i).data(THREAD)]
+    assert len(window.threads.selectedItems()) == len(rows) >= 2
+    assert window.selection_bar.isVisibleTo(window) and str(len(rows)) in window.selection_text.text()
+    window.read_button.click()
+    assert all(window.threads.item(i).data(THREAD).unread == 0 for i in range(window.threads.count())
+               if window.threads.item(i).data(THREAD))
+    assert not window.threads.selectedItems() and not window.selection_bar.isVisibleTo(window)
+    from PySide6.QtWidgets import QApplication
+    _settle(QApplication.instance(), lambda: not window._pushes)
+    assert any(c[0] == "seen" for c in window.service._source.changes)
+    rows = [window.threads.item(i) for i in range(window.threads.count()) if window.threads.item(i).data(THREAD)]
+    first, second = rows[0], rows[1]
+    first.setSelected(True)
+    second.setSelected(True)
+    subjects = {first.data(THREAD).subject, second.data(THREAD).subject}
+    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.Yes)
+    window.delete_button.click()
+    left = {window.threads.item(i).data(THREAD).subject for i in range(window.threads.count())
+            if window.threads.item(i).data(THREAD)}
+    assert not subjects & left

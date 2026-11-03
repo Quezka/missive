@@ -294,6 +294,63 @@ class MailService:
     def set_seen(self, key: tuple[int, str, int], seen: bool):
         self._store.set_seen(*key, seen)
 
+    # ---- changes the user asks for (several messages at once) ----
+
+    @staticmethod
+    def _by_folder(keys) -> dict[tuple[int, str], tuple[int, ...]]:
+        out: dict[tuple[int, str], list[int]] = {}
+        for account_id, folder, uid in keys:
+            out.setdefault((account_id, folder), []).append(uid)
+        return {k: tuple(sorted(set(v))) for k, v in out.items()}
+
+    def all_keys(self, account_id: int | None, folder: str | None) -> tuple[tuple[int, str, int], ...]:
+        """Every message this list holds here, not only the ones on screen ("select all in this folder")."""
+        return tuple((m.account_id, m.folder, m.uid) for m in self._store.messages(account_id, folder, 1_000_000))
+
+    def mark_seen(self, keys, seen: bool) -> tuple[tuple[int, str, int], ...]:
+        """Mark read or unread here at once (the list redraws straight away); returns the ones that changed,
+        to be passed to `push_seen` on a worker thread."""
+        changed = []
+        for key in keys:
+            m = self._store.message(*key)
+            if m is not None and m.seen != seen:
+                self._store.set_seen(*key, seen)
+                changed.append(key)
+        return tuple(changed)
+
+    def push_seen(self, keys, seen: bool) -> list[str]:
+        """Tell the servers (network: worker thread). Returns what failed, for the user."""
+        return self._push(keys, lambda account, folder, uids: self._source.set_seen(account, folder, uids, seen))
+
+    def delete(self, keys) -> tuple[tuple[int, str, int, str], ...]:
+        """Take these messages off the list here at once; returns what `push_delete` must do on the server
+        (each with the trash it goes to, "" when it is in the trash already or there is none)."""
+        trash = {f.account_id: f.name for f in self._store.folders() if f.role == "trash"}
+        plan = []
+        for (account_id, folder), uids in self._by_folder(keys).items():
+            self._store.delete_messages(account_id, folder, uids)
+            to = trash.get(account_id, "")
+            plan.extend((account_id, folder, uid, "" if to == folder else to) for uid in uids)
+        return tuple(plan)
+
+    def push_delete(self, plan) -> list[str]:
+        trash = {(a, f, u): t for a, f, u, t in plan}
+        return self._push(tuple(trash), lambda account, folder, uids: self._source.delete(
+            account, folder, uids, trash[(account.id, folder, uids[0])] or None))
+
+    def _push(self, keys, change) -> list[str]:
+        accounts = {a.id: a for a in self._store.accounts()}
+        problems = []
+        for (account_id, folder), uids in self._by_folder(keys).items():
+            account = accounts.get(account_id)
+            if account is None:
+                continue
+            try:
+                change(account, folder, uids)
+            except Exception as e:  # noqa: BLE001 (reported, the rest still goes ahead)
+                problems.append(f"{account.name}: {e}")
+        return problems
+
     def thread_for(self, keys: tuple[tuple[int, str, int], ...]) -> ThreadRecord | None:
         """The conversation made of these messages as it is now (after one was read or flagged), so the list
         can update that one row instead of being rebuilt."""

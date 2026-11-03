@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.6.0] - 2026-11-03
+
+### Added
+- **Settings tab** (the gear, or Ctrl+,): accounts (add, remove), how often to check for new mail (2 to 30 minutes, or
+  only on refresh), appearance and high contrast, language, interface size, updates.
+- **Updates from inside the app**: Missive checks GitHub once a day and installs the new .deb or setup itself.
+- **Several messages at once**: Ctrl/Shift+click, Ctrl+A or the select-all button, then mark as read, mark as
+  unread or delete (to the server's Trash). "Select all N here" reaches past what the list shows. Right-click and
+  the Delete key work too. These are the only changes Missive makes on the server, and only when you ask.
+
 ## [0.5.1] - 2026-10-27
 
 Fixed: a letter you open is marked read in the list at once (the dot and the bold go away, the unread counts drop, the list doesn't jump), even while its text is still loading.

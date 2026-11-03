@@ -41,6 +41,11 @@
 
   <!-- Newest first. Every released version needs an entry. -->
   <releases>
+    <release version="0.6.0" date="2026-11-03">
+      <description>
+        <p>A Settings tab, self-updates, and selecting several messages to mark as read, unread or delete them.</p>
+      </description>
+    </release>
     <release version="0.5.1" date="2026-10-27">
       <description>
         <p>A letter you open is marked read in the list at once. Fixed pictures in mail: pictures inside a message now show at once, and Load pictures really loads the ones on the internet, safely (public addresses only, no cookies, size and time limits).</p>

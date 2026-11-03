@@ -12,7 +12,7 @@ from PySide6.QtGui import (
     QActionGroup, QColor, QCursor, QDesktopServices, QFont, QFontMetrics, QKeySequence, QPainter, QPixmap, QShortcut,
 )
 from PySide6.QtWidgets import (
-    QApplication, QFrame, QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem, QMainWindow, QMenu,
+    QAbstractItemView, QApplication, QFrame, QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem, QMainWindow, QMenu,
     QMessageBox, QProgressBar, QScrollArea, QSizePolicy, QSplitter, QStackedWidget, QStyle, QStyledItemDelegate,
     QStyleOptionViewItem, QToolButton, QVBoxLayout, QWidget,
 )
@@ -24,6 +24,7 @@ from ..application.services import MailService
 from . import icons, theme
 from .account_dialog import AccountDialog
 from .compose_dialog import ComposeDialog
+from .background import run_in_background
 from .mail_reader import MailReader
 from .settings_page import SettingsPage, check_minutes
 from .updates_ui import UpdateChecker
@@ -314,6 +315,7 @@ class MainWindow(QMainWindow):
         self._open_tasks: set[_OpenTask] = set()
         self._composers: list[ComposeDialog] = []
         self._send_tasks: set[_SendTask] = set()
+        self._pushes: set = set()  # changes on their way to the server
         self._pending: tuple[DraftRecord, int] | None = None  # (message waiting to go out, seconds left)
         self.setWindowTitle(APP_NAME)
         self.resize(1240, 780)
@@ -376,7 +378,10 @@ class MainWindow(QMainWindow):
         titles.setSpacing(2)
         titles.addWidget(self.title)
         titles.addWidget(self.subtitle)
+        self.select_button = icon_button("checklist", _("Select all (Ctrl+A)"))
+        self.select_button.clicked.connect(self.select_all)
         head.addLayout(titles, 1)
+        head.addWidget(self.select_button, 0, Qt.AlignTop)
         head.addWidget(self.sync_button, 0, Qt.AlignTop)
         self.busy = QProgressBar()
         self.busy.setRange(0, 0)  # indeterminate: we know it's working, not how far it is
@@ -388,7 +393,34 @@ class MainWindow(QMainWindow):
         self.threads.setMouseTracking(True)
         self.threads.setFrameShape(QFrame.NoFrame)
         self.threads.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.threads.setSelectionMode(QAbstractItemView.ExtendedSelection)  # Ctrl/Shift+click, Ctrl+A
         self.threads.currentItemChanged.connect(lambda cur, _prev: self._thread_picked(cur))
+        self.threads.itemSelectionChanged.connect(self._selection_changed)
+        self.threads.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.threads.customContextMenuRequested.connect(self._list_menu)
+        QShortcut(QKeySequence(QKeySequence.Delete), self.threads, activated=self.delete_selected,
+                  context=Qt.WidgetShortcut)
+        self._whole_folder = False  # "select all" reached past what the list shows
+        self.selection_bar = QFrame(objectName="banner")
+        bar = QHBoxLayout(self.selection_bar)
+        bar.setContentsMargins(12, 6, 6, 6)
+        bar.setSpacing(4)
+        self.selection_text = QLabel(wordWrap=True)
+        self.whole_button = button("")
+        self.whole_button.clicked.connect(self._select_whole_folder)
+        self.read_button = icon_button("eye", _("Mark as read"))
+        self.read_button.clicked.connect(lambda: self.mark_selected(True))
+        self.unread_button = icon_button("circle", _("Mark as unread"))
+        self.unread_button.clicked.connect(lambda: self.mark_selected(False))
+        self.delete_button = icon_button("trash", _("Delete (Del)"))
+        self.delete_button.clicked.connect(self.delete_selected)
+        self.clear_button = icon_button("x", _("Clear the selection (Esc)"))
+        self.clear_button.clicked.connect(self.clear_selection)
+        bar.addWidget(self.selection_text, 1)
+        for w in (self.whole_button, self.read_button, self.unread_button, self.delete_button, self.clear_button):
+            bar.addWidget(w)
+        self.selection_bar.hide()
+        QShortcut(QKeySequence("Esc"), self.threads, activated=self.clear_selection, context=Qt.WidgetShortcut)
         self.empty_list = label(_("Nothing here yet"), "hint")
         self.empty_list.setAlignment(Qt.AlignCenter)
         self.empty_list.hide()
@@ -399,6 +431,7 @@ class MainWindow(QMainWindow):
         middle_layout.addLayout(head)
         middle_layout.addWidget(self.search)
         middle_layout.addWidget(self.busy)
+        middle_layout.addWidget(self.selection_bar)
         middle_layout.addWidget(self.threads, 1)
         middle_layout.addWidget(self.empty_list, 1)
 
@@ -508,8 +541,8 @@ class MainWindow(QMainWindow):
         welcome.setSpacing(12)
         self.welcome_icon = QLabel(alignment=Qt.AlignCenter)
         headline = QLabel(_("Welcome to Missive"), objectName="pageTitle", alignment=Qt.AlignCenter)
-        intro = label(_("Add your mail account to start. Missive reads your mail without changing it, and sends "
-                        "only what you write yourself."), "muted")
+        intro = label(_("Add your mail account to start. Missive changes nothing on the mail server unless you "
+                        "ask it to (mark as read, delete), and sends only what you write yourself."), "muted")
         intro.setWordWrap(True)
         intro.setAlignment(Qt.AlignCenter)
         intro.setMaximumWidth(440)
@@ -698,9 +731,111 @@ class MainWindow(QMainWindow):
         r: ThreadRecord | None = item.data(THREAD) if item is not None else None
         if r is None:
             return self._clear_reader()
+        if len(self.threads.selectedItems()) > 1:  # picking several, not reading
+            return
         account_id, folder, uid = r.keys[-1]  # the newest message of the conversation
         self.load_images = False
         self._open(account_id, folder, uid, pending=r)
+
+    # ---- several at once: select, mark read or unread, delete ----
+
+    def _selected(self) -> list[ThreadRecord]:
+        return [r for item in self.threads.selectedItems() if (r := item.data(THREAD)) is not None]
+
+    def _selected_keys(self) -> tuple[tuple[int, str, int], ...]:
+        if self._whole_folder:
+            account_id, folder = (None, "INBOX") if self._scope == ALL_INBOXES else self._scope
+            return self.service.all_keys(account_id, folder)
+        return tuple(k for r in self._selected() for k in r.keys)
+
+    def _scope_total(self) -> int:
+        account_id, folder = (None, "INBOX") if self._scope == ALL_INBOXES else self._scope
+        return len(self.service.all_keys(account_id, folder))
+
+    def select_all(self):
+        self.threads.selectAll()
+        self.threads.setFocus()
+
+    def clear_selection(self):
+        self._whole_folder = False
+        self.threads.clearSelection()
+
+    def _select_whole_folder(self):
+        self._whole_folder = True
+        self._selection_changed()
+
+    def _selection_changed(self):
+        picked = self._selected()
+        if len(picked) < 2:
+            self._whole_folder = False
+            self.selection_bar.hide()
+            return
+        rows = sum(1 for i in range(self.threads.count()) if self.threads.item(i).data(THREAD) is not None)
+        if self._whole_folder:
+            self.selection_text.setText(_("All {n} messages here selected").format(n=self._scope_total()))
+            self.whole_button.hide()
+        else:
+            self.selection_text.setText(_("{n} conversations selected").format(n=len(picked)))
+            total = self._scope_total() if len(picked) == rows and not self.search.text().strip() else 0
+            shown = sum(r.count for r in picked)
+            self.whole_button.setText(_("Select all {n} here").format(n=total))
+            self.whole_button.setVisible(total > shown)
+        self.selection_bar.show()
+
+    def _list_menu(self, pos):
+        item = self.threads.itemAt(pos)
+        if item is None or item.data(THREAD) is None:
+            return
+        if not item.isSelected():
+            self.threads.setCurrentItem(item)
+        menu = QMenu(self)
+        menu.addAction(_("Mark as read"), lambda: self.mark_selected(True))
+        menu.addAction(_("Mark as unread"), lambda: self.mark_selected(False))
+        menu.addSeparator()
+        menu.addAction(_("Delete"), self.delete_selected)
+        menu.addSeparator()
+        menu.addAction(_("Select all"), self.select_all)
+        menu.exec(self.threads.viewport().mapToGlobal(pos))
+
+    def mark_selected(self, seen: bool):
+        keys = self._selected_keys()
+        changed = self.service.mark_seen(keys, seen)
+        if not seen and self._record is not None and \
+                (self._record.account_id, self._record.folder, self._record.uid) in keys:
+            self._clear_reader()  # reading it would mark it read again at once
+        self.clear_selection()
+        self.show_list(preserve=True)
+        self.refresh_folders_counts()
+        if changed:
+            self._push(lambda: self.service.push_seen(changed, seen))
+
+    def delete_selected(self):
+        keys = self._selected_keys()
+        if not keys:
+            return
+        answer = QMessageBox.question(self, APP_NAME, _("Delete {n} message(s)?\n\nThey go to the Trash on the mail "
+                                      "server. From the Trash itself, or where an account has no Trash, they are "
+                                      "deleted for good.").format(n=len(keys)))
+        if answer != QMessageBox.Yes:
+            return
+        plan = self.service.delete(keys)
+        self.clear_selection()
+        self.show_list()
+        self.refresh_folders_counts()
+        self._push(lambda: self.service.push_delete(plan))
+
+    def _push(self, call):
+        """Tell the server on a worker thread; the list has already changed. Problems end up in the status line."""
+        def done(problems):
+            self._pushes.discard(worker)
+            if problems:
+                self.status.setText(_("The server didn't take every change"))
+                self.status.setToolTip("\n".join(problems))
+
+        def failed(error):
+            done([str(error)])
+        worker = run_in_background(call, done, failed)
+        self._pushes.add(worker)
 
     # ---- the reader ----
 

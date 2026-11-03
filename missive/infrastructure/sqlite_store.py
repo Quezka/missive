@@ -211,6 +211,15 @@ class SqliteStore:
             self.conn.execute("UPDATE messages SET flagged = ? WHERE account_id = ? AND folder = ? AND uid = ?",
                               (int(flagged), account_id, folder, uid))
 
+    def delete_messages(self, account_id, folder, uids):
+        marks = ",".join("?" * len(uids))
+        where = f"account_id = ? AND folder = ? AND uid IN ({marks})"
+        with self.conn:
+            if self.fts:
+                self.conn.execute(f"DELETE FROM mail_fts WHERE rowid IN (SELECT id FROM messages WHERE {where})",
+                                  (account_id, folder, *uids))
+            self.conn.execute(f"DELETE FROM messages WHERE {where}", (account_id, folder, *uids))
+
     def search(self, query: str, limit: int) -> list[Message]:
         words = [w for w in query.replace('"', " ").split() if w]
         if not words:

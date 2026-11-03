@@ -29,6 +29,13 @@ class DemoSource:
 
     def __init__(self, now: datetime | None = None):
         self.now = now or datetime.now()
+        self.changes: list[tuple] = []  # what the user asked the "server" to change, for tests
+
+    def set_seen(self, account: Account, folder: str, uids: tuple[int, ...], seen: bool) -> None:
+        self.changes.append(("seen" if seen else "unseen", account.id, folder, tuple(uids)))
+
+    def delete(self, account: Account, folder: str, uids: tuple[int, ...], trash: str | None) -> None:
+        self.changes.append(("delete", account.id, folder, tuple(uids), trash))
 
     def check(self, account: Account, password: str) -> None:
         pass  # the demo accepts anything

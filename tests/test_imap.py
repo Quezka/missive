@@ -1,4 +1,5 @@
-"""The IMAP adapter against a pretend server: it must only ever look, never change anything."""
+"""The IMAP adapter against a pretend server: it only ever looks, except for the changes the user asks for
+(mark read/unread, delete), which go through their own connection."""
 from datetime import datetime
 
 import pytest
@@ -333,3 +334,55 @@ def test_a_message_without_inline_pictures_is_fetched_once():
     fake = Sliced(related("<p>Hello</p>", {}))
     ImapSource(lambda i: "x", connect=lambda a: fake).body(ACCOUNT, "INBOX", 7)
     assert len(fake.fetches) == 1
+
+
+class ChangingImap(FakeImap):
+    def __init__(self, capabilities=()):
+        super().__init__()
+        self.capabilities = capabilities
+
+    def uid(self, command, *args):
+        if command in ("STORE", "MOVE", "COPY", "EXPUNGE"):
+            self.calls.append(("uid", command, *args))
+            return "OK", [b""]
+        return super().uid(command, *args)
+
+
+def test_marking_read_selects_the_folder_for_changes_and_stores_the_flag():
+    fake = ChangingImap()
+    source(fake).set_seen(ACCOUNT, "INBOX", (3, 7), True)
+    assert ("select", '"INBOX"', False) in fake.calls  # SELECT, not EXAMINE
+    assert ("uid", "STORE", "3,7", "+FLAGS", "(\\Seen)") in fake.calls
+    source(fake).set_seen(ACCOUNT, "INBOX", (3,), False)
+    assert ("uid", "STORE", "3", "-FLAGS", "(\\Seen)") in fake.calls
+
+
+def test_deleting_moves_to_the_trash_when_the_server_can():
+    fake = ChangingImap(("IMAP4REV1", "MOVE", "UIDPLUS"))
+    source(fake).delete(ACCOUNT, "INBOX", (3, 7), "Trash")
+    changes = [c[1] for c in fake.calls if c[0] == "uid"]
+    assert changes == ["MOVE"] and ("uid", "MOVE", "3,7", '"Trash"') in fake.calls
+
+
+def test_without_move_it_copies_then_deletes_only_those_messages():
+    fake = ChangingImap(("IMAP4REV1", "UIDPLUS"))
+    source(fake).delete(ACCOUNT, "INBOX", (7,), "Trash")
+    assert [c[1] for c in fake.calls if c[0] == "uid"] == ["COPY", "STORE", "EXPUNGE"]
+    assert ("uid", "EXPUNGE", "7") in fake.calls  # UID EXPUNGE: never a folder-wide EXPUNGE
+    plain = ChangingImap(("IMAP4REV1",))
+    source(plain).delete(ACCOUNT, "INBOX", (7,), "Trash")
+    assert [c[1] for c in plain.calls if c[0] == "uid"] == ["COPY", "STORE"]  # left marked deleted, not expunged
+
+
+def test_deleting_from_the_trash_deletes_for_good():
+    fake = ChangingImap(("IMAP4REV1", "MOVE", "UIDPLUS"))
+    source(fake).delete(ACCOUNT, "Trash", (7,), None)
+    assert [c[1] for c in fake.calls if c[0] == "uid"] == ["STORE", "EXPUNGE"]
+
+
+def test_a_refused_change_is_a_source_error():
+    class Refusing(ChangingImap):
+        def uid(self, command, *args):
+            return ("NO", [b"read-only"]) if command == "STORE" else super().uid(command, *args)
+    with pytest.raises(SourceError):
+        source(Refusing()).set_seen(ACCOUNT, "INBOX", (7,), True)

@@ -179,3 +179,29 @@ def test_the_store_can_be_read_while_another_thread_writes_into_it():
         store.unread_counts()
     writer.join()
     assert not errors and store.max_uid(account.id, "INBOX") == 300
+
+
+def test_marking_several_read_changes_the_list_at_once_then_tells_the_server(service):
+    inbox = service.all_keys(None, "INBOX")
+    assert len(inbox) >= 7
+    changed = service.mark_seen(inbox, True)
+    assert sum(t.unread for t in service.threads(None, "INBOX")) == 0  # the list is right before the server answers
+    assert service.mark_seen(inbox, True) == ()  # nothing left to change
+    assert service.push_seen(changed, True) == []
+    told = service._source.changes
+    assert {c[0] for c in told} == {"seen"} and sum(len(c[3]) for c in told) == len(changed)
+    service.push_seen(service.mark_seen(changed[:1], False), False)
+    assert told[-1][0] == "unseen"
+
+
+def test_deleting_takes_messages_off_the_list_and_sends_them_to_the_trash(service):
+    from missive.domain import Folder
+    service._store.save_folders([Folder(1, "Trash", "trash")])
+    thread = next(t for t in service.threads(None, "INBOX") if t.subject == "ER diagram homework")
+    plan = service.delete(thread.keys)
+    assert all(t.subject != "ER diagram homework" for t in service.threads(None, "INBOX"))
+    assert service.push_delete(plan) == []
+    told = [c for c in service._source.changes if c[0] == "delete"]
+    by_account = {c[1]: c[4] for c in told}
+    assert by_account.get(1) == "Trash"  # School has a trash
+    assert all(trash is None for account, trash in by_account.items() if account != 1)  # no trash: gone for good

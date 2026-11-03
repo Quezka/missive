@@ -290,6 +290,53 @@ class ImapSource:
             if status != "OK":
                 raise SourceError(f"{account.name}: the server wouldn't keep a copy in {folder}")
 
+    # ---- changes, only ever on the user's request (mark read/unread, delete) ----
+
+    @staticmethod
+    def _select(slot: _Slot, folder: str) -> None:
+        """Open a folder for changes (SELECT, not EXAMINE), on the "write" connection only."""
+        if slot.folder != folder:
+            status, _ = slot.conn.select(f'"{folder}"')
+            if status != "OK":
+                slot.folder = None
+                raise SourceError(f"the server wouldn't open {folder}")
+            slot.folder = folder
+
+    @staticmethod
+    def _ok(answer, what: str):
+        status, _data = answer
+        if status != "OK":
+            raise SourceError(f"the server refused to {what}")
+
+    @staticmethod
+    def _chunks(uids: tuple[int, ...], size: int = 400):
+        for i in range(0, len(uids), size):
+            yield ",".join(str(u) for u in uids[i:i + size])
+
+    def set_seen(self, account: Account, folder: str, uids: tuple[int, ...], seen: bool) -> None:
+        with self._kept(account, "write") as slot:
+            self._select(slot, folder)
+            for chunk in self._chunks(uids):
+                self._ok(slot.conn.uid("STORE", chunk, "+FLAGS" if seen else "-FLAGS", "(\\Seen)"),
+                         "mark the messages read" if seen else "mark the messages unread")
+
+    def delete(self, account: Account, folder: str, uids: tuple[int, ...], trash: str | None) -> None:
+        """To the trash with MOVE (or COPY + delete where MOVE is missing). Expunging is per message (UID
+        EXPUNGE, UIDPLUS): a plain EXPUNGE would also wipe other messages someone marked deleted elsewhere,
+        so without UIDPLUS they stay marked deleted and the server or another client clears them later."""
+        with self._kept(account, "write") as slot:
+            caps = {str(c).upper() for c in getattr(slot.conn, "capabilities", ())}
+            self._select(slot, folder)
+            for chunk in self._chunks(uids):
+                if trash and trash != folder:
+                    if "MOVE" in caps:
+                        self._ok(slot.conn.uid("MOVE", chunk, f'"{trash}"'), "move the messages to the trash")
+                        continue
+                    self._ok(slot.conn.uid("COPY", chunk, f'"{trash}"'), "copy the messages to the trash")
+                self._ok(slot.conn.uid("STORE", chunk, "+FLAGS", "(\\Deleted)"), "delete the messages")
+                if "UIDPLUS" in caps:
+                    self._ok(slot.conn.uid("EXPUNGE", chunk), "delete the messages")
+
     @staticmethod
     def _close(conn):
         try:
