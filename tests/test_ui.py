@@ -117,18 +117,24 @@ def test_every_folder_can_be_opened(window):
         assert window.title.text()
 
 
-def test_the_window_has_a_menu_for_appearance_and_removing_accounts(window):
-    from PySide6.QtCore import QTimer
-    from PySide6.QtWidgets import QApplication, QMenu
-    seen = []
-
-    def look():
-        menu = next(w for w in QApplication.topLevelWidgets() if isinstance(w, QMenu) and w.isVisible())
-        seen.extend(a.text() for a in menu.actions())
-        menu.close()
-    QTimer.singleShot(200, look)
-    window._show_menu()
-    assert "Appearance" in seen and any(t.startswith("Remove ") for t in seen)
+def test_settings_is_a_tab_with_accounts_check_interval_and_a_way_back(window, monkeypatch):
+    from PySide6.QtCore import QSettings
+    from PySide6.QtWidgets import QMessageBox
+    window.menu_button.click()
+    page = window.settings
+    assert window.pages.currentWidget() is page
+    names = [w.text() for w in page.findChildren(type(page.title)) if w.objectName() == "sheetTitle"]
+    assert len(names) == len(window.service.accounts()) == 2
+    window._synced(type("R", (), {"problems": [], "new": 0})(), "")  # a background check
+    assert window.pages.currentWidget() is page  # doesn't throw you out of Settings
+    page.check_every.setCurrentIndex(page.check_every.findData(0))
+    assert int(QSettings().value("mail/check_minutes")) == 0
+    page.check_every.setCurrentIndex(page.check_every.findData(5))
+    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.Yes)
+    window.remove_account(window.service.accounts()[0].id)
+    assert window.pages.currentWidget() is page and len(window.service.accounts()) == 1
+    page.back.emit()
+    assert window.pages.currentWidget() is window.split
 
 
 def _settle(app, until, seconds=10):

@@ -16,6 +16,19 @@ def data_dir() -> Path:
     return path
 
 
+def build_updates(demo: bool = False):
+    """Self-updates from GitHub releases; None in the demo (nothing may touch the network there)."""
+    if demo:
+        return None
+    from . import __version__
+    from .application.updates import UpdateService
+    from .infrastructure.settings import JsonSettings
+    from .infrastructure.updates import GitHubReleaseFeed, platform_installer
+
+    return UpdateService(GitHubReleaseFeed("Quezka/missive", __version__), platform_installer(),
+                         JsonSettings(), __version__)
+
+
 def build_services(demo: bool = False, store=None, source=None, passwords=None) -> MailService:
     """The app's use cases. `--demo` runs on made-up mail in memory; nothing touches a server."""
     if demo:

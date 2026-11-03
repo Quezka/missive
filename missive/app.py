@@ -19,6 +19,7 @@ def main(argv: list[str] | None = None) -> int:
         logging.basicConfig(level=logging.DEBUG, stream=sys.stderr, format="%(asctime)s %(name)s: %(message)s")
         logging.getLogger("PIL").setLevel(logging.WARNING)
     services = build_services(demo=args.demo)
+    from .bootstrap import build_updates
     from .presentation.qt_app import run  # imported late so --help needs no display
 
-    return run(services, [argv[0], *qt_args])
+    return run(services, [argv[0], *qt_args], updates=build_updates(args.demo))

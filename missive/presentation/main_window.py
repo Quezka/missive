@@ -25,12 +25,13 @@ from . import icons, theme
 from .account_dialog import AccountDialog
 from .compose_dialog import ComposeDialog
 from .mail_reader import MailReader
+from .settings_page import SettingsPage, check_minutes
+from .updates_ui import UpdateChecker
 from .i18n import _
 from .views.common import Card, button, icon_button, label, primary_button
 
 THREAD, HEADER = Qt.UserRole + 1, Qt.UserRole + 2
 ALL_INBOXES = ("all", None)
-SYNC_EVERY_MS = 5 * 60 * 1000
 FOLDER_ICONS = {"inbox": "inbox", "sent": "send", "drafts": "edit", "archive": "archive", "trash": "trash",
                 "junk": "alert", "": "folder"}
 # Dark enough for white initials on any theme.
@@ -299,9 +300,10 @@ class _SendTask(QRunnable):
 class MainWindow(QMainWindow):
     SEND_DELAY = 8  # seconds to change your mind after pressing Send
 
-    def __init__(self, service: MailService, auto_sync: bool = False):
+    def __init__(self, service: MailService, auto_sync: bool = False, updates=None):
         super().__init__()
         self.service = service
+        self.updates = updates
         self.load_images = False
         self._record: MessageRecord | None = None
         self._scope = ALL_INBOXES
@@ -344,7 +346,7 @@ class MainWindow(QMainWindow):
         self.add_account_button = button(_("Add account"), "plus")
         self.add_account_button.clicked.connect(self.add_account)
         self.menu_button = icon_button("settings", _("Settings"))
-        self.menu_button.clicked.connect(self._show_menu)
+        self.menu_button.clicked.connect(self.show_settings)
         self.status = label("", "hint")
         self.status.setWordWrap(True)
         foot = QHBoxLayout()
@@ -524,7 +526,17 @@ class MainWindow(QMainWindow):
         self.pages = QStackedWidget()
         self.pages.addWidget(self.split)
         self.pages.addWidget(self.welcome)
+        self.updater = UpdateChecker(updates, self) if updates is not None else None
+        self.settings = SettingsPage(service, updates, self.updater)
+        self.settings.back.connect(self.show_mail)
+        self.settings.addAccount.connect(self.add_account)
+        self.settings.removeAccount.connect(self.remove_account)
+        self.settings.checkEveryChanged.connect(self._restart_auto_check)
+        self.pages.addWidget(self.settings)
         self.setCentralWidget(self.pages)
+        QShortcut(QKeySequence("Ctrl+,"), self, activated=self.show_settings)
+        QShortcut(QKeySequence("Esc"), self.settings, activated=self.show_mail,
+                  context=Qt.WidgetWithChildrenShortcut)
 
         for keys, action in ((("Ctrl+R", "F5"), self.sync), (("Ctrl+F",), self.search.setFocus)):
             for key in keys:
@@ -534,9 +546,23 @@ class MainWindow(QMainWindow):
         self._clear_reader()
         self._auto_timer = QTimer(self)
         self._auto_timer.timeout.connect(self.sync)
+        self._auto_sync = auto_sync
         if auto_sync:
-            self._auto_timer.start(SYNC_EVERY_MS)
+            self._restart_auto_check(check_minutes())
             QTimer.singleShot(400, self._first_sync)
+
+    def _restart_auto_check(self, minutes: int):
+        self._auto_timer.stop()
+        if self._auto_sync and minutes:
+            self._auto_timer.start(minutes * 60 * 1000)
+
+    def show_settings(self):
+        self.settings.refresh_accounts()
+        self.pages.setCurrentWidget(self.settings)
+
+    def show_mail(self):
+        self.pages.setCurrentWidget(self.split)
+        self.refresh_folders()
 
     def _first_sync(self):
         if self.service.accounts():
@@ -589,7 +615,8 @@ class MainWindow(QMainWindow):
         if self._scope not in self.nav:
             self._scope = ALL_INBOXES
         self.nav[self._scope].setChecked(True)
-        self.pages.setCurrentWidget(self.split if accounts else self.welcome)
+        if self.pages.currentWidget() is not self.settings:  # a check in the background doesn't close Settings
+            self.pages.setCurrentWidget(self.split if accounts else self.welcome)
         self.show_list(preserve=True)
 
     def _add_nav(self, text: str, icon_name: str, scope, unread: int):
@@ -884,34 +911,12 @@ class MainWindow(QMainWindow):
     def add_account(self):
         dialog = AccountDialog(self.service, self)
         if dialog.exec() == AccountDialog.Accepted and dialog.added:
+            self.settings.refresh_accounts()
             self.refresh_folders()
             self.sync()
 
     def contextMenuEvent(self, event):  # right-click on an account's section title removes the account
         pass
-
-    def _show_menu(self):
-        menu = QMenu(self)
-        manager = theme.manager()
-        look = menu.addMenu(_("Appearance"))
-        group = QActionGroup(look)
-        for mode, text in (("system", _("System")), ("light", _("Light")), ("dark", _("Dark"))):
-            action = look.addAction(text)
-            action.setCheckable(True)
-            action.setChecked(manager.mode == mode)
-            action.triggered.connect(lambda _c=False, m=mode: manager.set_mode(m))
-            group.addAction(action)
-        contrast = menu.addAction(_("High contrast (black and white, thick lines)"))
-        contrast.setCheckable(True)
-        contrast.setChecked(manager.contrast)
-        contrast.toggled.connect(manager.set_contrast)
-        accounts = self.service.accounts()
-        if accounts:
-            menu.addSeparator()
-            for account in accounts:
-                remove = menu.addAction(_("Remove {name}…").format(name=account.name))
-                remove.triggered.connect(lambda _c=False, a=account.id: self.remove_account(a))
-        menu.exec(self.menu_button.mapToGlobal(self.menu_button.rect().topRight()))
 
     def remove_account(self, account_id: int):
         name = next((a.name for a in self.service.accounts() if a.id == account_id), "")
@@ -921,7 +926,9 @@ class MainWindow(QMainWindow):
         if answer == QMessageBox.Yes:
             self.service.remove_account(account_id)
             self._scope = ALL_INBOXES
-            self.refresh_folders()
+            self.settings.refresh_accounts()
+            if self.pages.currentWidget() is not self.settings:
+                self.refresh_folders()
 
     # ---- fetching ----
 

@@ -13,4 +13,8 @@ class SourceError(ApplicationError):
     """The mail server could not be reached or refused us."""
 
 
-__all__ = ["ApplicationError", "DomainError", "NotFound", "SourceError"]
+class UpdateError(ApplicationError):
+    """Checking for, downloading or installing a new version didn't work."""
+
+
+__all__ = ["ApplicationError", "DomainError", "NotFound", "SourceError", "UpdateError"]

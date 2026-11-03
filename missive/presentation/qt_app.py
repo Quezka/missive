@@ -14,10 +14,10 @@ def create_application(argv: list[str]) -> QApplication:
     return _create(argv, name=APP_NAME, app_id=APP_ID, icon=ICON, locale_package="missive.presentation.locales")
 
 
-def run(services, argv: list[str]) -> int:
+def run(services, argv: list[str], updates=None) -> int:
     from .main_window import MainWindow
 
     app = create_application(argv)
-    window = MainWindow(services, auto_sync=True)  # looks for new mail when it opens, then every few minutes
+    window = MainWindow(services, auto_sync=True, updates=updates)  # looks for new mail when it opens, then every few minutes
     window.show()
     return app.exec()
