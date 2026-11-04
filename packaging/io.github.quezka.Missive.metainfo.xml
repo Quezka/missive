@@ -41,6 +41,11 @@
 
   <!-- Newest first. Every released version needs an entry. -->
   <releases>
+    <release version="0.8.0" date="2026-11-04">
+      <description>
+        <p>A new look: Material 3 shapes and tonal colours, and the Manrope typeface. A flick on a trackpad now keeps gliding; a mouse wheel works as before.</p>
+      </description>
+    </release>
     <release version="0.7.2" date="2026-11-04">
       <description>
         <p>Fixed: changing the interface size and pressing Restart now works, and a button's menu opens exactly under the button (kit 0.5.3).</p>

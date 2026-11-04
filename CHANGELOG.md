@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.8.0] - 2026-11-04
+
+### Changed
+- A new look: Material 3 shapes and tonal colours, and the Manrope typeface. A flick on a trackpad now keeps gliding; a mouse wheel works as before.
+
 ## [0.7.2] - 2026-11-04
 
 Fixed: changing the interface size and pressing Restart now works, and a button's menu opens exactly under the button (kit 0.5.3).
