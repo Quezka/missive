@@ -249,6 +249,20 @@ class _SyncJob(QObject):
         self.finished.emit()
 
 
+class _AheadTask(QRunnable):
+    """Downloads the letters around the open one, so moving down the list doesn't wait for the server."""
+
+    def __init__(self, service: MailService, keys, stop):
+        super().__init__()
+        self._service, self._keys, self._stop = service, keys, stop
+
+    def run(self):
+        try:
+            self._service.fetch_ahead(self._keys, self._stop)
+        except Exception:  # noqa: BLE001 (only a head start: they are fetched when opened)
+            pass
+
+
 class _OpenTask(QRunnable):
     """Opens a message that has to be fetched from the server, off the UI thread."""
 
@@ -846,7 +860,8 @@ class MainWindow(QMainWindow):
         key = (account_id, folder, uid)
         self.service.set_seen(key, True)  # looking at it is reading it: the list shows that at once
         self._refresh_row(key)
-        if not self.service.needs_fetch(*key):
+        self._fetch_neighbours()
+        if self.service.opens_instantly(key, self.load_images):
             try:
                 return self._show(self.service.open(*key, self.load_images))
             except ApplicationError as e:
@@ -871,6 +886,19 @@ class MainWindow(QMainWindow):
         self._open_tasks.add(task)
         task.signals.done.connect(lambda seq, record, problem, t=task: self._opened(seq, record, problem, t))
         QThreadPool.globalInstance().start(task)
+
+    def _fetch_neighbours(self):
+        row = self.threads.currentRow()
+        keys = []
+        for i in (row + 1, row + 2, row + 3, row - 1):
+            item = self.threads.item(i) if 0 <= i < self.threads.count() else None
+            record = item.data(THREAD) if item is not None else None
+            if record is not None and self.service.needs_fetch(*record.keys[-1]):
+                keys.append(record.keys[-1])
+        if keys:
+            seq = self._open_seq  # a newer click replaces this plan
+            QThreadPool.globalInstance().start(_AheadTask(self.service, tuple(keys),
+                                                          lambda: seq != self._open_seq))
 
     def _opened(self, seq: int, record: MessageRecord | None, problem: str, task: _OpenTask):
         self._open_tasks.discard(task)

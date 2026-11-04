@@ -205,3 +205,21 @@ def test_deleting_takes_messages_off_the_list_and_sends_them_to_the_trash(servic
     by_account = {c[1]: c[4] for c in told}
     assert by_account.get(1) == "Trash"  # School has a trash
     assert all(trash is None for account, trash in by_account.items() if account != 1)  # no trash: gone for good
+
+
+def test_big_letters_are_prepared_off_the_ui_thread_and_kept_ready(service):
+    from missive.application.services import INSTANT_HTML
+    key = service.all_keys(None, "INBOX")[0]
+    service._store.save_body(*key, "", "<p>x</p>" * (INSTANT_HTML // 8 + 1))
+    assert not service.opens_instantly(key)
+    first = service.open(*key)
+    assert service.opens_instantly(key)  # cleaned once: going back to it is instant
+    assert service.open(*key).html == first.html
+    assert not service.opens_instantly(key, load_images=True)  # a different cleaning
+
+
+def test_fetching_ahead_downloads_what_is_missing_and_can_be_stopped(service):
+    keys = [k for k in service.all_keys(None, "INBOX") if service.needs_fetch(*k)]
+    assert len(keys) >= 2
+    assert service.fetch_ahead(keys[:1]) == 1 and not service.needs_fetch(*keys[0])
+    assert service.fetch_ahead(keys[1:], stop=lambda: True) == 0

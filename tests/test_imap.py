@@ -386,3 +386,19 @@ def test_a_refused_change_is_a_source_error():
             return ("NO", [b"read-only"]) if command == "STORE" else super().uid(command, *args)
     with pytest.raises(SourceError):
         source(Refusing()).set_seen(ACCOUNT, "INBOX", (7,), True)
+
+
+def test_a_connection_used_a_moment_ago_is_not_asked_if_it_is_alive():
+    class Noops(FakeImap):
+        noops = 0
+
+        def noop(self):
+            Noops.noops += 1
+            return "OK", [b""]
+    src = source(Noops())
+    src.body(ACCOUNT, "INBOX", 7)
+    src.body(ACCOUNT, "INBOX", 7)
+    assert Noops.noops == 0  # one less wait on every click
+    src.TRUST_FOR = 0
+    src.body(ACCOUNT, "INBOX", 7)
+    assert Noops.noops == 1

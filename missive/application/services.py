@@ -3,14 +3,16 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from ..domain import (AUTH_METHODS, OAUTH_HOSTS, Account, Address, DomainError, Message, Outgoing, check_outgoing,
-                      clean_html, display_name, forward_subject, forwarded, group, guess_server, image_urls,
-                      link_targets, parse_recipients, quote, reply_recipients, reply_subject, smtp_for, text_of, valid_address)
+                      clean_mail, display_name, forward_subject, forwarded, group, guess_server,
+                      parse_recipients, quote, reply_recipients, reply_subject, smtp_for, text_of, valid_address)
 from .errors import ApplicationError, NotFound, SourceError
 from .ports import MailSender, MailSource, MessageStore, OAuthClient, PasswordStore
 from .records import (AccountDraft, AccountRecord, DraftRecord, FolderRecord, MessageRecord, ServerGuess, SyncReport,
                       ThreadRecord)
 
 PER_FOLDER = 200  # how many of the newest messages a folder shows
+INSTANT_HTML = 40_000  # a letter's HTML up to this size is cleaned straight away; bigger ones off the UI thread
+CLEANED_KEPT = 40  # letters whose cleaned HTML stays ready, so going back to one is instant
 
 
 class MailService:
@@ -23,6 +25,7 @@ class MailService:
         self._passwords = passwords
         self._oauth = oauth
         self._sender = sender
+        self._cleaned: dict[tuple, tuple] = {}  # (account, folder, uid, load_images) -> clean_mail(...)
 
     # ---- accounts and folders ----
 
@@ -247,11 +250,35 @@ class MailService:
         m = self._store.message(account_id, folder, uid)
         return m is not None and not m.fetched
 
+    def opens_instantly(self, key: tuple[int, str, int], load_images: bool = False) -> bool:
+        """Whether `open` will be quick enough for the UI thread: the text is here, and is short or already cleaned."""
+        m = self._store.message(*key)
+        return (m is not None and m.fetched
+                and (len(m.body_html or "") <= INSTANT_HTML or (*key, load_images) in self._cleaned))
+
+    def fetch_ahead(self, keys, stop=None) -> int:
+        """Download the letters the user is likely to open next (network: worker thread)."""
+        accounts = {a.id: a for a in self._store.accounts()}
+        done = 0
+        for key in keys:
+            if stop is not None and stop():
+                break
+            account, m = accounts.get(key[0]), self._store.message(*key)
+            if account is None or m is None or m.fetched:
+                continue
+            try:
+                text, html = self._source.body(account, key[1], key[2], background=True)
+            except Exception:  # noqa: BLE001 (it will be fetched when the user opens it)
+                break
+            self._store.save_body(*key, text, html)
+            done += 1
+        return done
+
     def is_flagged(self, key: tuple[int, str, int]) -> bool:
         m = self._store.message(*key)
         return bool(m and m.flagged)
 
-    def prefetch(self, limit: int = 15, stop=None) -> int:
+    def prefetch(self, limit: int = 30, stop=None) -> int:
         """Download the text of the newest messages of each inbox that haven't got it, so that opening them
         is instant. A server that fails ends that account's turn; `stop()` returning True ends it all."""
         done = 0
@@ -289,7 +316,17 @@ class MailService:
         if mark_seen and not m.seen:
             self._store.set_seen(account_id, folder, uid, True)
             m.seen = True
-        return _message_record(m, load_images)
+        return self._record_of(m, load_images)
+
+    def _record_of(self, m: Message, load_images: bool) -> MessageRecord:
+        key = (m.account_id, m.folder, m.uid, load_images)
+        cleaned = self._cleaned.get(key)
+        if cleaned is None:
+            cleaned = clean_mail(m.body_html, load_images) if m.body_html else None
+            self._cleaned[key] = cleaned
+            while len(self._cleaned) > CLEANED_KEPT:
+                self._cleaned.pop(next(iter(self._cleaned)), None)
+        return _message_record(m, cleaned)
 
     def set_seen(self, key: tuple[int, str, int], seen: bool):
         self._store.set_seen(*key, seen)
@@ -383,15 +420,15 @@ def _first_name(a) -> str:
     return next((w for w in words if not w.endswith(".")), words[0])
 
 
-def _message_record(m: Message, load_images: bool) -> MessageRecord:
-    if m.body_html:
-        safe, blocked = clean_html(m.body_html, load_images)
+def _message_record(m: Message, cleaned: tuple | None) -> MessageRecord:
+    if cleaned is not None:
+        safe, blocked, links, images = cleaned
         text = m.body_text or text_of(m.body_html)
     else:
         import html as _html
         text = m.body_text or ""
-        safe, blocked = "<p>" + _html.escape(text).replace("\n", "<br>") + "</p>", 0
+        safe, blocked, links, images = "<p>" + _html.escape(text).replace("\n", "<br>") + "</p>", 0, (), ()
     return MessageRecord(
         m.account_id, m.folder, m.uid, m.subject or "(no subject)", m.sender.display, m.sender.email,
         ", ".join(str(a) for a in m.to), ", ".join(str(a) for a in m.cc), m.sent, m.seen, m.flagged,
-        safe, text, blocked, tuple(link_targets(m.body_html or "")), tuple(image_urls(m.body_html or "")))
+        safe, text, blocked, links, images)

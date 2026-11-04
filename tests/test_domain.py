@@ -106,3 +106,33 @@ def test_the_list_of_pictures_to_fetch_has_no_repeats_and_a_limit():
     html = "".join(f'<img src="https://cdn.example.com/{i % 60}.png">' for i in range(200))
     urls = image_urls(html)
     assert len(urls) == 40 and len(set(urls)) == 40
+
+
+def test_a_letter_keeps_its_look_but_nothing_that_loads_or_runs():
+    from missive.domain.sanitize import clean_html, clean_style
+    out, _n = clean_html('<table width="600" bgcolor="#fff" onclick="x()" background="http://t.example/a.png"><tr>'
+                         '<td align="center" colspan="2" style="color:#123456;padding:8px 4px;background:url(http://t.example/p)">'
+                         'Hi</td></tr></table>')
+    assert 'width="600"' in out and 'bgcolor="#fff"' in out and 'align="center"' in out and 'colspan="2"' in out
+    assert "color: #123456" in out and "padding: 8px 4px" in out
+    assert "onclick" not in out and "t.example" not in out and "url(" not in out
+    assert clean_style("color: expression(alert(1)); position: fixed; width: 10px") == "width: 10px"
+    assert clean_style("background: #ff0000 !important; font-weight: bold") == "background-color: #ff0000; font-weight: bold"
+    assert clean_style("font-family: Arial, 'Helvetica Neue'; behavior: url(x.htc)") == "font-family: Arial, 'Helvetica Neue'"
+    attack, _n = clean_html('<p style="color:red&quot; onmouseover=&quot;x()">t</p><td width="1 onload=x">y</td>')
+    assert "onmouseover" not in attack and "onload" not in attack
+
+
+def test_text_the_sender_hid_stays_hidden_but_broken_html_loses_nothing():
+    from missive.domain.sanitize import clean_html
+    out, _n = clean_html('<div style="display:none">preview <div>inner</div> text</div><p>Real</p>')
+    assert "preview" not in out and "inner" not in out and "text" not in out and "Real" in out
+    out, _n = clean_html('<span style="font-size:0px;opacity:0">x</span><span style="font-size:0.9em">Seen</span>')
+    assert ">x<" not in out and "Seen" in out
+    assert "Everything" in clean_html('<div style="display:none">Everything after a tag that never closes')[0]
+
+
+def test_html5_blocks_become_divs_and_font_keeps_its_colour():
+    from missive.domain.sanitize import clean_html
+    out, _n = clean_html('<section><font color="red" face="x">Hi</font></section>')
+    assert out == '<div><font color="red">Hi</font></div>'

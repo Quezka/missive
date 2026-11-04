@@ -114,12 +114,15 @@ class _Slot:
         self.lock = threading.Lock()
         self.conn = None
         self.folder = None  # the folder selected on it, so asking again for the same one costs nothing
+        self.used = 0.0  # when it last answered (wall clock: it also counts the time the laptop slept)
 
 
 class ImapSource:
     """MailSource over IMAP-over-TLS. `passwords` maps an account id to its secret (the OS keyring in
     the app): the password, or for a Google or Microsoft account the OAuth refresh token, which `oauth`
     turns into an access token for XOAUTH2. `connect` makes the connection (replaced in tests)."""
+
+    TRUST_FOR = 30  # seconds a connection is taken as alive without asking: NOOP is one more wait on every click
 
     def __init__(self, passwords, connect=None, oauth=None):
         self._passwords = passwords
@@ -159,7 +162,7 @@ class ImapSource:
         with self._slots_lock:
             slot = self._slots.setdefault((account.id, purpose), _Slot())
         with slot.lock:
-            if slot.conn is not None:
+            if slot.conn is not None and time.time() - slot.used >= self.TRUST_FOR:
                 try:
                     slot.conn.noop()  # also lets the server tell us about new mail
                 except Exception:  # noqa: BLE001 (any way a dead connection can fail)
@@ -172,6 +175,7 @@ class ImapSource:
                           time.monotonic() - started)
             try:
                 yield slot
+                slot.used = time.time()
             except Exception:
                 self._close(slot.conn)
                 slot.conn, slot.folder = None, None

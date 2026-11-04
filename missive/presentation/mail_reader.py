@@ -14,6 +14,10 @@ from PySide6.QtWidgets import QTextBrowser
 MAX_BYTES = 8_000_000  # one picture
 MAX_PIXELS = 40_000_000
 TIMEOUT_MS = 15_000
+_WIDTH_ATTR = re.compile(r'''(<(?:table|td|th|img|hr)\b[^>]*?\swidth=")(\d+)(?:px)?(")''', re.I)
+_WIDTH_CSS = re.compile(r"(\bwidth:\s*)(\d+)px", re.I)
+_DESIGNED = re.compile(r"(\sbgcolor=|\scolor=|\bcolor:|background-color:)", re.I)
+PAPER = "QTextBrowser { background: #ffffff; color: #1a1a1a; }"
 _DATA_SRC = re.compile(r"""(src\s*=\s*")(data:image/[a-z]+;base64,[A-Za-z0-9+/=\s]+)(")""", re.I)
 
 
@@ -38,7 +42,11 @@ class MailReader(QTextBrowser):
         """Show cleaned HTML. `remote` lists the internet pictures to fetch: pass it only when the user asked."""
         self._stop()
         self._arrived = 0
-        self._html = self._register_embedded(html)
+        # A designed letter picked its colours for white paper, so that is what it gets, even in the dark theme.
+        designed = bool(_DESIGNED.search(html))
+        self.setStyleSheet(PAPER if designed else "")
+        self.document().setDefaultStyleSheet("a { color: #0b57d0; }" if designed else "")
+        self._html = self._fit_widths(self._register_embedded(html))
         self.setHtml(self._html)
         for url in remote:
             self._fetch(url, self._generation)
@@ -46,6 +54,7 @@ class MailReader(QTextBrowser):
     def clear_mail(self):
         self._stop()
         self._html = ""
+        self.setStyleSheet("")
         self.setHtml("")
 
     def _stop(self):
@@ -62,6 +71,12 @@ class MailReader(QTextBrowser):
         from PySide6.QtCore import Qt
         return image.scaledToWidth(self._max_width(), Qt.SmoothTransformation) if image.width() > self._max_width() \
             else image
+
+    def _fit_widths(self, html: str) -> str:
+        """A 640 px layout in a narrower reader takes the room there is instead of scrolling sideways."""
+        room = self._max_width()
+        html = _WIDTH_ATTR.sub(lambda m: f"{m.group(1)}100%{m.group(3)}" if int(m.group(2)) > room else m.group(0), html)
+        return _WIDTH_CSS.sub(lambda m: f"{m.group(1)}100%" if int(m.group(2)) > room else m.group(0), html)
 
     def _register_embedded(self, html: str) -> str:
         """Pictures written into the HTML as data: addresses become document resources, scaled to fit."""
