@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.9.0] - 2026-11-04
+
+### Changed
+- The icons are Material Symbols now: outlined, and filled for what is selected.
+
 ## [0.8.0] - 2026-11-04
 
 ### Changed
