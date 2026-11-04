@@ -41,6 +41,11 @@
 
   <!-- Newest first. Every released version needs an entry. -->
   <releases>
+    <release version="0.7.2" date="2026-11-04">
+      <description>
+        <p>Fixed: changing the interface size and pressing Restart now works, and a button's menu opens exactly under the button (kit 0.5.3).</p>
+      </description>
+    </release>
     <release version="0.7.1" date="2026-11-04">
       <description>
         <p>HTML mail keeps its colours and layout, safely. Big letters no longer freeze the window, and the letters next to the open one are downloaded ahead.</p>

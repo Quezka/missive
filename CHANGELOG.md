@@ -1,5 +1,9 @@
 # Changelog
 
+## [0.7.2] - 2026-11-04
+
+Fixed: changing the interface size and pressing Restart now works, and a button's menu opens exactly under the button (kit 0.5.3).
+
 ## [0.7.1] - 2026-11-04
 
 (0.7.0 was tagged by mistake with the wrong version number and never released.)
