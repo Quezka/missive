@@ -157,6 +157,7 @@ def test_a_connection_the_server_dropped_is_replaced_quietly():
         return connections[-1]
     src = ImapSource(lambda i: "secret", connect=connect)
     src.body(ACCOUNT, "INBOX", 7)
+    src.TRUST_FOR = 0  # it has been sitting idle for a while
     connections[0].alive = False  # the server hung up while the app sat idle
     text, _html = src.body(ACCOUNT, "INBOX", 7)
     assert len(connections) == 2 and text.strip() == "Hello plain"

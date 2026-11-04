@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.7.1] - 2026-11-04
+
+(0.7.0 was tagged by mistake with the wrong version number and never released.)
+
+### Changed
+- **HTML mail looks as it was designed**: colours, tables, widths, alignment and fonts are kept (still with no scripts, no forms and nothing loaded from the internet by itself). Text the sender hid, like a newsletter's preview line, stays hidden. A designed letter is shown on white paper, also in the dark theme, and a layout wider than the reader fits the room instead of scrolling sideways.
+- **Much more responsive**: a big letter no longer freezes the window while it is prepared (over 2 seconds before, a few milliseconds now), one you have just read opens at once, the letters next to the open one are downloaded ahead, and each click saves a round trip to the server.
+
 ## [0.6.0] - 2026-11-03
 
 ### Added
