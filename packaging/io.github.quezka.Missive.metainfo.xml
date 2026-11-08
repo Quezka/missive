@@ -41,6 +41,11 @@
 
   <!-- Newest first. Every released version needs an entry. -->
   <releases>
+    <release version="0.11.0" date="2026-11-08">
+      <description>
+        <p>liquid glass the Apple way: plain backgrounds, real blur under menus and headers</p>
+      </description>
+    </release>
     <release version="0.10.0" date="2026-11-08">
       <description>
         <p>a glass look with brighter colours and the new Settings rows and switches</p>
