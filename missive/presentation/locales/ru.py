@@ -195,4 +195,6 @@ MESSAGES = {
     'Select all (Ctrl+A)': 'Выбрать всё (Ctrl+A)',
     'Select all {n} here': 'Выбрать все здесь ({n})',
     "The server didn't take every change": 'Сервер принял не все изменения',
+    "Glass look": "Эффект стекла",
+    "Frosted, see-through surfaces over a soft wash of colour.": "Матовые полупрозрачные поверхности на мягком цветном фоне.",
 }

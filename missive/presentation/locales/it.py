@@ -195,4 +195,6 @@ MESSAGES = {
     'Select all (Ctrl+A)': 'Seleziona tutto (Ctrl+A)',
     'Select all {n} here': 'Seleziona tutti i {n} qui',
     "The server didn't take every change": 'Il server non ha accettato tutte le modifiche',
+    "Glass look": "Aspetto vetro",
+    "Frosted, see-through surfaces over a soft wash of colour.": "Superfici smerigliate e trasparenti su una leggera sfumatura di colore.",
 }

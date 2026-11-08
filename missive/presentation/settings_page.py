@@ -3,7 +3,8 @@ from __future__ import annotations
 
 from PySide6.QtCore import QSettings, Qt, QUrl, Signal
 from PySide6.QtGui import QDesktopServices
-from PySide6.QtWidgets import QCheckBox, QComboBox, QHBoxLayout, QLabel, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QComboBox, QHBoxLayout, QLabel, QVBoxLayout, QWidget
+from quezka_ui.settings import SettingsCard
 
 from .. import APP_NAME, HOMEPAGE, __version__
 from ..application.services import MailService
@@ -43,7 +44,7 @@ class SettingsPage(Page):
         self.leading.addWidget(back)
 
         # ---- accounts
-        accounts = Card(_("Accounts"))
+        accounts = SettingsCard(_("Accounts"))
         self.account_rows = QVBoxLayout()
         self.account_rows.setSpacing(6)
         accounts.body.addLayout(self.account_rows)
@@ -53,59 +54,53 @@ class SettingsPage(Page):
         accounts.add(label(_("Removing an account only forgets it here: nothing changes on the mail server."), "hint"))
 
         # ---- mail
-        mail = Card(_("Mail"))
-        mail.add(caption(_("Check for new mail")))
+        mail = SettingsCard(_("Mail"))
         self.check_every = QComboBox()
         for minutes in CHECK_CHOICES:
             self.check_every.addItem(_("Every {n} minutes").format(n=minutes) if minutes else
                                      _("Only when I press refresh"), minutes)
         self.check_every.setCurrentIndex(max(0, self.check_every.findData(check_minutes())))
         self.check_every.currentIndexChanged.connect(self._check_changed)
-        mail.add(self.check_every)
+        mail.row(_("Check for new mail"), self.check_every, stretch_control=True)
 
-        # ---- appearance
+        # ---- appearance, language and size (the last two apply after a restart)
         manager = theme.manager()
-        appearance = Card(_("Appearance"))
+        appearance = SettingsCard(_("Appearance"))
         mode = Segmented([("system", _("System")), ("light", _("Light")), ("dark", _("Dark"))])
         mode.set_value(manager.mode)
         mode.changed.connect(manager.set_mode)
-        appearance.add(mode)
-        contrast = QCheckBox(_("High contrast (black and white, thick lines)"))
-        contrast.setChecked(manager.contrast)
-        contrast.toggled.connect(manager.set_contrast)
-        appearance.add(contrast)
-
-        # ---- language and size (both apply after a restart)
-        language = Card(_("Language"))
+        appearance.row(_("Appearance"), mode)
+        appearance.switch(_("Glass look"), manager.glass,
+                          _("Frosted, see-through surfaces over a soft wash of colour."), manager.set_glass)
+        appearance.switch(_("High contrast (black and white, thick lines)"), manager.contrast,
+                          on_toggled=manager.set_contrast)
         self.language = QComboBox()
         for code, name in i18n.LANGUAGES:
             self.language.addItem(_(name) if code == "" else name, code)
         self.language.setCurrentIndex(max(0, self.language.findData(i18n.chosen_language())))
         self.language.currentIndexChanged.connect(self._language_changed)
-        language.add(caption(_("Interface language")))
-        language.add(self.language)
-        size = Card(_("Interface size"))
+        appearance.row(_("Interface language"), self.language, stretch_control=True)
         self.scale = QComboBox()
         for choice in uiscale.CHOICES:
             self.scale.addItem(_("Automatic") if choice == "auto" else f"{choice}%", choice)
         self.scale.setCurrentIndex(max(0, self.scale.findData(uiscale.chosen())))
         self.scale.currentIndexChanged.connect(self._scale_changed)
-        size.add(self.scale)
-        size.add(label(_("Language and size apply after a restart."), "hint"))
+        appearance.row(_("Interface size"), self.scale, _("Language and size apply after a restart."),
+                       stretch_control=True)
         self.restart = primary_button(_("Restart Missive now"), "refresh")
         self.restart.hide()
         self.restart.clicked.connect(restart_app)
-        size.add(self.restart)
+        appearance.wide(self.restart)
 
         # ---- updates
-        update_card = Card(_("Updates"))
-        auto = QCheckBox(_("Check for new versions once a day"))
-        check = button(_("Check now"), "refresh")
+        update_card = SettingsCard(_("Updates"))
+        auto = update_card.switch(_("Check for new versions once a day"), bool(updates and updates.auto_check()),
+                                  _("You have version {version}.").format(version=__version__))
         if updates is not None:
-            auto.setChecked(updates.auto_check())
             auto.toggled.connect(updates.set_auto_check)
         else:
             auto.setEnabled(False)
+        check = button(_("Check now"), "refresh")
         check.setEnabled(updater is not None)
         if updater is not None:
             check.clicked.connect(lambda: updater.check_now())
@@ -116,13 +111,11 @@ class SettingsPage(Page):
         row.addWidget(check)
         row.addWidget(site)
         row.addStretch()
-        update_card.add(auto)
-        update_card.body.addLayout(row)
-        update_card.add(label(_("You have version {version}.").format(version=__version__), "hint"))
+        update_card.wide(layout=row)
 
         column = QVBoxLayout()
         column.setSpacing(12)
-        for card in (accounts, mail, appearance, language, size, update_card):
+        for card in (accounts, mail, appearance, update_card):
             column.addWidget(card)
         column.addStretch()
         holder = QWidget()
