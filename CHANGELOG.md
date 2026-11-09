@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.13.0] - 2026-11-09
+
+The suite's new shared look (one design system for every app, `suite-rs/design/tokens.json`):
+
+- **Neutral greys** instead of blue-tinted backgrounds, sidebars and borders; indigo stays as the one accent colour.
+- **Bigger, clearer text** on one type scale shared with the phone apps: body text 16 px, nothing smaller than 13 px;
+  titles and buttons follow the same sizes everywhere (the Interface size setting still scales it all).
+- The same corner radii and spacing in every app.
+
 ## [0.12.0] - 2026-11-09
 
 Real transparency and corners that line up (suite-kit 0.10).
