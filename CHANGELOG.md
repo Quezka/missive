@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.12.0] - 2026-11-09
+
+Real transparency and corners that line up (suite-kit 0.10).
+
+- **See-through windows**: where the desktop can blur what's behind a window, the main window and dialogs let it show
+  through, like Windows Aero or macOS sidebars; cards stay solid. On Windows it's the system's Acrylic. On GNOME it
+  needs the Blur my Shell extension (the app adds itself to its list). Switch it in Settings, Look.
+- **Corners line up**: the sidebar, cards and the Settings list share one radius and one gap, and what's inside them is
+  rounded to match, so the curves run side by side. The Settings header floats over the cards, as wide as them.
+- The glass look's description in Settings says what it really does now.
+
 ## [0.11.0] - 2026-11-08
 
 ### Changed

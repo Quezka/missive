@@ -71,7 +71,14 @@ class SettingsPage(Page):
         mode.changed.connect(manager.set_mode)
         appearance.row(_("Appearance"), mode)
         appearance.switch(_("Glass look"), manager.glass,
-                          _("Frosted, see-through surfaces over a soft wash of colour."), manager.set_glass)
+                          _("Menus, bars and headers blur what's under them."), manager.set_glass)
+        if hasattr(manager, "set_see_through"):
+            from quezka_ui import theme as kit_theme
+            possible = kit_theme.SEE_THROUGH_POSSIBLE
+            see_through = appearance.switch(_("See-through windows"), manager.see_through and possible,
+                            _("The desktop shows through, blurred. Takes effect the next time the app starts.") if possible
+                            else _("On GNOME this needs the Blur my Shell extension."), manager.set_see_through)
+            see_through.setEnabled(possible)
         appearance.switch(_("High contrast (black and white, thick lines)"), manager.contrast,
                           on_toggled=manager.set_contrast)
         self.language = QComboBox()
