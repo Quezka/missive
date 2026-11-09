@@ -1,5 +1,9 @@
 # Changelog
 
+## [0.13.1] - 2026-11-09
+
+- Smoother scrolling and window moves: the app only asks GNOME's Blur my Shell to blur behind its windows while they're see-through (with see-through off, that blur was redone on every frame for nothing). The glass header over scrolling pages is cheaper to draw.
+
 ## [0.13.0] - 2026-11-09
 
 The suite's new shared look (one design system for every app, `suite-rs/design/tokens.json`):

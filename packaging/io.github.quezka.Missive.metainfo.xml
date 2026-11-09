@@ -41,6 +41,11 @@
 
   <!-- Newest first. Every released version needs an entry. -->
   <releases>
+    <release version="0.13.1" date="2026-11-09">
+      <description>
+        <p>Smoother scrolling: Blur my Shell only blurs behind see-through windows.</p>
+      </description>
+    </release>
     <release version="0.13.0" date="2026-11-09">
       <description>
         <p>The suite's new shared look: neutral greys, bigger clearer text, the same radii everywhere.</p>
