@@ -30,6 +30,7 @@ from .settings_page import SettingsPage, check_minutes
 from .updates_ui import UpdateChecker
 from .i18n import _
 from .views.common import Card, button, icon_button, label, primary_button
+from quezka_ui.fit import exec_menu
 
 THREAD, HEADER = Qt.UserRole + 1, Qt.UserRole + 2
 ALL_INBOXES = ("all", None)
@@ -809,7 +810,7 @@ class MainWindow(QMainWindow):
         menu.addAction(_("Delete"), self.delete_selected)
         menu.addSeparator()
         menu.addAction(_("Select all"), self.select_all)
-        menu.exec(self.threads.viewport().mapToGlobal(pos))
+        exec_menu(menu, self.threads.viewport().mapToGlobal(pos))
 
     def mark_selected(self, seen: bool):
         keys = self._selected_keys()
