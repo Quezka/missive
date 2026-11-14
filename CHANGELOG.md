@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.14.0] - 2026-11-14
+
+The suite's new look: **Material 3, tonal** (no more liquid glass).
+
+- A **navigation rail**: each page an icon with its name under it; icons only in a narrow window.
+- Soft tonal background, white cards with big round corners, filled text boxes, darker text, one filled button for the main action.
+- Menus, lists and tooltips are solid; the "Glass look" and "See-through windows" settings are gone, and the app leaves GNOME Blur my Shell's list (smoother scrolling).
+
 ## [0.13.2] - 2026-11-14
 
 - **Menus open where you click, at any interface size** (they used to drift up and left above 100 %, on Wayland).
