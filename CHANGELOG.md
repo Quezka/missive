@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.14.1] - 2026-11-15
+
+- **New icon**, drawn like every other Quezka app: the same rounded square in its own plain colour with a white symbol.
+- Navigation rail on short screens (a 1366×768 laptop): when the page names under the icons would squeeze together, they move beside the icons (kit 0.13.1).
+
 ## [0.14.0] - 2026-11-14
 
 The suite's new look: **Material 3, tonal** (no more liquid glass).

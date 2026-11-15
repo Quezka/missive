@@ -1,14 +1,1 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">
-  <!-- Missive: a letter with its flap folded and one amber wax seal. -->
-  <defs>
-    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#6b6be0"/>
-      <stop offset="1" stop-color="#4c4cc4"/>
-    </linearGradient>
-  </defs>
-  <rect x="16" y="16" width="224" height="224" rx="52" fill="url(#bg)"/>
-  <rect x="48" y="78" width="160" height="108" rx="14" fill="#ffffff"/>
-  <path d="M52 90 L128 148 L204 90" fill="none" stroke="#c7c7f2" stroke-width="10"
-        stroke-linecap="round" stroke-linejoin="round"/>
-  <circle cx="128" cy="148" r="17" fill="#f5a524" stroke="#4c4cc4" stroke-width="6"/>
-</svg>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128"><rect x="8" y="8" width="112" height="112" rx="28" fill="#B45309"/><path fill="#FFFFFF" transform="translate(32 96) scale(0.066667)" d="M162.87-151.87q-37.78 0-64.39-26.61t-26.61-64.39v-474.26q0-37.78 26.61-64.39t64.39-26.61h634.26q37.78 0 64.39 26.61t26.61 64.39v474.26q0 37.78-26.61 64.39t-64.39 26.61H162.87ZM480-437.91q5.96 0 12.17-1.74 6.22-1.74 11.94-5.22L779.7-618.76q8.23-5 12.83-13.22t4.6-18.17q0-21.44-18.55-32.51-18.56-11.08-38.23 1.12L480-517.13 219.65-681.54q-19.43-11.96-38.11-.86-18.67 11.1-18.67 32.25 0 10.95 4.6 19.05 4.6 8.1 12.83 12.34l275.59 173.89q5.72 3.48 11.94 5.22 6.21 1.74 12.17 1.74Z"/></svg>
