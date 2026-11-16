@@ -41,6 +41,11 @@
 
   <!-- Newest first. Every released version needs an entry. -->
   <releases>
+    <release version="0.15.1" date="2026-11-16">
+      <description>
+        <p>Lists and menus open right under their box with a custom interface size.</p>
+      </description>
+    </release>
     <release version="0.15.0" date="2026-11-16">
       <description>
         <p>Fits split screen on small laptops, trackpad glide, and roomier text.</p>

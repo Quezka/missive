@@ -1,5 +1,9 @@
 # Changelog
 
+## [0.15.1] - 2026-11-16
+
+- **Lists and menus open right under their box** when you chose an interface size other than 100% on GNOME (kit 0.15.1).
+
 ## [0.15.0] - 2026-11-16
 
 - **Fits split screen:** the window can shrink to half of a 1366×768 screen; pages that need more room scroll sideways instead of pushing the window wider, and the start tiles wrap (kit 0.15.0).
