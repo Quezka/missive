@@ -1,5 +1,9 @@
 # Changelog
 
+## [0.14.2] - 2026-11-16
+
+- **Fits small screens better:** on a small screen or a small window (like a 1366×768 laptop) text and spacing get a little tighter instead of being cut or squeezed, and follow as you resize the window (kit 0.14.0).
+
 ## [0.14.1] - 2026-11-15
 
 - **New icon**, drawn like every other Quezka app: the same rounded square in its own plain colour with a white symbol.
