@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.15.0] - 2026-11-16
+
+- **Fits split screen:** the window can shrink to half of a 1366×768 screen; pages that need more room scroll sideways instead of pushing the window wider, and the start tiles wrap (kit 0.15.0).
+- **Trackpad glide:** a two-finger flick keeps scrolling after your fingers lift, on GNOME too.
+- **Roomier text on small screens:** spacing around text no longer shrinks.
+
 ## [0.14.2] - 2026-11-16
 
 - **Fits small screens better:** on a small screen or a small window (like a 1366×768 laptop) text and spacing get a little tighter instead of being cut or squeezed, and follow as you resize the window (kit 0.14.0).
